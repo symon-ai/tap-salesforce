@@ -156,9 +156,7 @@ def field_to_property_schema(field, mdata, source_type):  # pylint:disable=too-m
     elif sf_type == "boolean":
         property_schema['type'] = "boolean"
     elif sf_type in NUMBER_OR_STRING_TYPES:
-        number_type = {"type": ["null", "number"]}
-        string_type = {"type": ["null", "string"]}
-        property_schema["anyOf"] = [number_type, string_type]
+        property_schema['type'] = ["number", "string", "null"]
     elif sf_type in NUMBER_TYPES:
         property_schema['type'] = "number"
     elif sf_type == "address":
