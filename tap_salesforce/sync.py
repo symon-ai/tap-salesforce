@@ -291,7 +291,8 @@ def fix_record_anytype(rec, schema):
             return val
 
     for k, v in rec.items():
-        if schema['properties'][k].get("type") is None:
+        typ = schema['properties'][k].get("type")
+        if typ is None:
             val = v
             val = try_cast(v, int)
             val = try_cast(v, float)
@@ -302,5 +303,7 @@ def fix_record_anytype(rec, schema):
                 val = None
 
             rec[k] = val
+        elif typ == 'number' or 'number' in typ:
+            rec[k] = '' if v == '-' else v
 
     return rec
