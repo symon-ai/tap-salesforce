@@ -292,6 +292,7 @@ def fix_record_anytype(rec, schema):
 
     for k, v in rec.items():
         typ = schema['properties'][k].get("type")
+        format = schema['properties'][k].get("format")
         if typ is None:
             val = v
             val = try_cast(v, int)
@@ -305,5 +306,7 @@ def fix_record_anytype(rec, schema):
             rec[k] = val
         elif typ == 'number' or 'number' in typ:
             rec[k] = '' if v == '-' else v
+        elif format is not None and format == 'date-time':
+            rec[k] = '' if v.lower() == '<null>' else v
 
     return rec
