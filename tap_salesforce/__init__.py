@@ -550,7 +550,9 @@ def main_impl():
             api_type=CONFIG.get('api_type'),
             source_type=CONFIG.get('source_type'),
             object_name=CONFIG.get('object_name'),
-            report_id=CONFIG.get('report_id'))
+            report_id=CONFIG.get('report_id'),
+            filters=CONFIG.get('filters')
+        )
 
         sf.login()
 
