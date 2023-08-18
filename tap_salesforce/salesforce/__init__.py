@@ -461,9 +461,8 @@ class Salesforce():
 
         if (self.filters):
             date_cols_in_filter = self.date_columns_in_filter(self.filters)
-            if len(date_cols_in_filter) > 0:
-                date_col_types = self.get_date_column_types(
-                    date_cols_in_filter)
+            date_col_types = self.get_date_column_types(
+                date_cols_in_filter)
             extra = self.filter_sql(self.filters, date_col_types)
             where_clauses.append(extra)
 
@@ -533,9 +532,12 @@ class Salesforce():
         return date_cols
 
     def get_date_column_types(self, date_cols_in_filter):
-        response = self.describe()
-
         date_col_types = dict()
+
+        if len(date_cols_in_filter) == 0:
+            return date_col_types
+
+        response = self.describe()
 
         if self.source_type == 'object':
             fields = response['fields']
