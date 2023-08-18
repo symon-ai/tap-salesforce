@@ -460,7 +460,11 @@ class Salesforce():
         replication_key = catalog_metadata.get((), {}).get('replication-key')
 
         if (self.filters):
-            extra = self.filter_sql(self.filters)
+            date_cols_in_filter = self.date_columns_in_filter(self.filters)
+            if len(date_cols_in_filter) > 0:
+                date_col_types = self.get_date_column_types(
+                    date_cols_in_filter)
+            extra = self.filter_sql(self.filters, date_col_types)
             where_clauses.append(extra)
 
         if replication_key:
@@ -520,15 +524,41 @@ class Salesforce():
                 "api_type should be REST or BULK was: {}".format(
                     self.api_type))
 
-    def filter_sql(self, filter):
+    def date_columns_in_filter(self, filter):
+        date_cols = set()
+        for f in filter["filters"]:
+            if f["rhs"]["litType"] == "date":
+                date_cols.add(f["lhs"]["name"])
+
+        return date_cols
+
+    def get_date_column_types(self, date_cols_in_filter):
+        response = self.describe()
+
+        date_col_types = dict()
+
+        if self.source_type == 'object':
+            fields = response['fields']
+            for f in fields:
+                if f['name'] in date_cols_in_filter:
+                    date_col_types[f['name']] = f['type']
+        elif self.source_type == 'report':
+            fields = response['reportExtendedMetadata']['detailColumnInfo']
+            for f in fields.values():
+                if f['label'] in date_cols_in_filter:
+                    date_col_types[f['label']] = f['dataType']
+
+        return date_col_types
+
+    def filter_sql(self, filter, date_col_types):
         if (filter["filterType"] == "statement"):
-            return self.filter_statement_sql(filter)
+            return self.filter_statement_sql(filter, date_col_types)
         else:
             filters = filter["filters"]
 
             group_filters_sql = []
             for f in filters:
-                child_sql = self.filter_sql(f)
+                child_sql = self.filter_sql(f, date_col_types)
                 if child_sql is not None:
                     group_filters_sql.append(child_sql)
 
@@ -538,7 +568,7 @@ class Salesforce():
             else:
                 return None
 
-    def filter_statement_sql(self, statement):
+    def filter_statement_sql(self, statement, date_col_types):
         lhs_sql = self.filter_operand_sql(statement["lhs"])
         op_sql = self.filter_op_sql(statement["op"])
 
@@ -546,6 +576,9 @@ class Salesforce():
             rhs_sql = self.filter_operand_sql(statement["rhs"])
 
             if statement["rhs"].get("litType") == 'date':
+                if date_col_types.get(lhs_sql) == 'datetime':
+                    # salesforce only store date in utc and needs Z at the end instead of +00:00, our filters need to match that
+                    rhs_sql = f"{datetime.fromisoformat(rhs_sql).replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z')}"
                 return f"({lhs_sql} {op_sql} {rhs_sql})"
             if statement["rhs"].get("litType") == 'number':
                 return f"({lhs_sql} {op_sql} {rhs_sql})"
@@ -564,11 +597,7 @@ class Salesforce():
         if operand["operandType"] == "column":
             return operand['name']
         else:
-            if operand["litType"] == 'date':
-                # salesforce only store date in utc and needs Z at the end instead of +00:00, our filters need to match that
-                return f"{datetime.fromisoformat(operand['value']).replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z')}"
-            else:
-                return operand['value']
+            return operand['value']
 
     def filter_op_sql(self, op):
         ops = {
