@@ -158,7 +158,7 @@ def do_discover_report(sf):
     unsupported_fields = set()
     properties = {}
     mdata = metadata.new()
-    source_column_types = dict()
+    source_column_types = {}
 
     # Loop over the report's fields
     for field_name, field in fields.items():
@@ -306,7 +306,7 @@ def do_discover_object(sf):
     unsupported_fields = set()
     properties = {}
     mdata = metadata.new()
-    source_column_types = dict()
+    source_column_types = {}
 
     found_id_field = False
 
