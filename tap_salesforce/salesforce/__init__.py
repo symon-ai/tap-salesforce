@@ -538,7 +538,6 @@ class Salesforce():
             else:
                 return None
 
-
     def filter_statement_sql(self, statement):
         lhs_sql = self.filter_operand_sql(statement["lhs"])
         op_sql = self.filter_op_sql(statement["op"])
@@ -547,6 +546,8 @@ class Salesforce():
             rhs_sql = self.filter_operand_sql(statement["rhs"])
 
             if statement["rhs"].get("litType") == 'date':
+                return f"({lhs_sql} {op_sql} {rhs_sql})"
+            if statement["rhs"].get("litType") == 'number':
                 return f"({lhs_sql} {op_sql} {rhs_sql})"
             if statement["op"] == "starts_with":
                 return f"({lhs_sql} {op_sql} '{rhs_sql}%')"
@@ -559,7 +560,6 @@ class Salesforce():
         else:
             return f"({lhs_sql} {op_sql})"
 
-
     def filter_operand_sql(self, operand):
         if operand["operandType"] == "column":
             return operand['name']
@@ -569,7 +569,6 @@ class Salesforce():
                 return f"{datetime.fromisoformat(operand['value']).replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z')}"
             else:
                 return operand['value']
-
 
     def filter_op_sql(self, op):
         ops = {
