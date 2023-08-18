@@ -576,11 +576,12 @@ class Salesforce():
             rhs_sql = self.filter_operand_sql(statement["rhs"])
 
             if statement["rhs"].get("litType") == 'date':
+                # Salesforce has date and datetime columns. Only datetime columns can include time, or query will throw an error
                 if date_col_types.get(lhs_sql) == 'datetime':
                     # salesforce only store date in utc and needs Z at the end instead of +00:00, our filters need to match that
                     rhs_sql = f"{datetime.fromisoformat(rhs_sql).replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z')}"
                 return f"({lhs_sql} {op_sql} {rhs_sql})"
-            if statement["rhs"].get("litType") == 'number':
+            if statement["rhs"].get("litType") == 'number' or statement["rhs"].get("litType") == 'boolean':
                 return f"({lhs_sql} {op_sql} {rhs_sql})"
             if statement["op"] == "starts_with":
                 return f"({lhs_sql} {op_sql} '{rhs_sql}%')"
