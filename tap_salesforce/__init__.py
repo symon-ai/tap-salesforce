@@ -158,9 +158,12 @@ def do_discover_report(sf):
     unsupported_fields = set()
     properties = {}
     mdata = metadata.new()
+    source_column_types = dict()
 
     # Loop over the report's fields
     for field_name, field in fields.items():
+        source_column_types[field_name] = field['dataType']
+
         property_schema, mdata = create_report_property_schema(
             field_name, field, mdata, sf.source_type)
 
@@ -236,7 +239,8 @@ def do_discover_report(sf):
         'tap_stream_id': sf.report_id,
         'schema': schema,
         'metadata': metadata.to_list(mdata),
-        'column_order': [str(column) for column in properties]
+        'column_order': [str(column) for column in properties],
+        'source_column_types': source_column_types
     }
 
     entries.append(entry)
@@ -302,12 +306,15 @@ def do_discover_object(sf):
     unsupported_fields = set()
     properties = {}
     mdata = metadata.new()
+    source_column_types = dict()
 
     found_id_field = False
 
     # Loop over the object's fields
     for f in fields:
         field_name = f['name']
+
+        source_column_types[field_name] = f['type']
 
         if field_name == "Id":
             found_id_field = True
@@ -410,7 +417,8 @@ def do_discover_object(sf):
         'tap_stream_id': sobject_name,
         'schema': schema,
         'metadata': metadata.to_list(mdata),
-        'column_order': [str(column) for column in properties]
+        'column_order': [str(column) for column in properties],
+        'source_column_types': source_column_types
     }
 
     entries.append(entry)
