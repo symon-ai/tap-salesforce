@@ -1,3 +1,4 @@
+import re
 import time
 import singer
 import singer.utils as singer_utils
@@ -142,6 +143,19 @@ def sync_stream(sf, catalog_entry, state):
                 if column is not None and entity is not None:
                     raise SymonException(
                         f'We can\'t find {column} column on {entity} {sf.source_type}. Review the Field Level Permissions in Salesforce and try importing your data again.', 'salesforce.InvalidField')
+
+            match = re.search(
+                "value of filter criterion for field '([A-Za-z0-9_]*)' must be of type ([A-Za-z0-9]*)", message)
+            if match is not None:
+                # Get filter value from error message
+                field_name = match.group(1)
+                operand_value_match = re.search(
+                    f"\({field_name} .* (.*?)\)", message)
+                if operand_value_match is not None:
+                    raise SymonException(
+                        f"Invalid filter: Field {field_name} filter value of {operand_value_match.group(1)} does not match field type of {match.group(2)}", 'salesforce.InvalidFilter')
+                raise SymonException(
+                    f"Invalid filter: Value of filter criterion for field '{field_name}' is of invalid type", 'salesforce.InvalidFilter')
 
             raise Exception("{}, (Stream: {})".format(
                 ex, stream)) from ex
