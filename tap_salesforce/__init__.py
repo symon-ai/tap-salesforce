@@ -158,12 +158,9 @@ def do_discover_report(sf):
     unsupported_fields = set()
     properties = {}
     mdata = metadata.new()
-    source_column_types = {}
 
     # Loop over the report's fields
     for field_name, field in fields.items():
-        source_column_types[field_name] = field['dataType']
-
         property_schema, mdata = create_report_property_schema(
             field_name, field, mdata, sf.source_type)
 
@@ -239,8 +236,7 @@ def do_discover_report(sf):
         'tap_stream_id': sf.report_id,
         'schema': schema,
         'metadata': metadata.to_list(mdata),
-        'column_order': [str(column) for column in properties],
-        'source_column_types': source_column_types
+        'column_order': [str(column) for column in properties]
     }
 
     entries.append(entry)
