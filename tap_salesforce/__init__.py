@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import traceback
 import sys
 import singer
 import singer.utils as singer_utils
@@ -10,7 +11,7 @@ from tap_salesforce.sync import (
 from tap_salesforce.salesforce import Salesforce
 from tap_salesforce.salesforce.bulk import Bulk
 from tap_salesforce.salesforce.exceptions import (
-    TapSalesforceException, TapSalesforceQuotaExceededException, TapSalesforceBulkAPIDisabledException)
+    TapSalesforceException, TapSalesforceQuotaExceededException, SymonException)
 
 LOGGER = singer.get_logger()
 
@@ -269,8 +270,8 @@ def do_discover_object(sf):
 
     # Check if the user has BULK API enabled
     if sf.api_type == 'BULK' and not Bulk(sf).has_permissions():
-        raise TapSalesforceBulkAPIDisabledException(
-            'This client does not have Bulk API permissions, received "API_DISABLED_FOR_ORG" error code')
+        raise SymonException(
+            'Bulk API permissions are currently disabled for this Salesforce account. Enable this setting in Salesforce and try again.', 'salesforce.BulkApiDisabled')
 
     sobject_name = sf.object_name
 
@@ -537,6 +538,8 @@ def do_sync(sf, catalog, state):
 
 
 def main_impl():
+    # used for storing error info to write if error occurs
+    error_info = None
     args = singer_utils.parse_args(REQUIRED_CONFIG_KEYS)
     CONFIG.update(args.config)
 
@@ -579,7 +582,40 @@ def main_impl():
 
             state = build_state(args.state, catalog)
             do_sync(sf, catalog, state)
+    except SymonException as e:
+        error_info = {
+            'message': str(e),
+            'code': e.code,
+            'traceback': traceback.format_exc()
+        }
+
+        if e.details is not None:
+            error_info['details'] = e.details
+        raise
+    except BaseException as e:
+        error_info = {
+            'message': str(e),
+            'traceback': traceback.format_exc()
+        }
+        raise
     finally:
+        if error_info is not None:
+            error_file_path = args.config.get('error_file_path', None)
+            if error_file_path is not None:
+                try:
+                    with open(error_file_path, 'w', encoding='utf-8') as fp:
+                        json.dump(error_info, fp)
+                except:
+                    pass
+            # log error info as well in case file is corrupted
+            error_info_json = json.dumps(error_info)
+            error_start_marker = args.config.get(
+                'error_start_marker', '[tap_error_start]')
+            error_end_marker = args.config.get(
+                'error_end_marker', '[tap_error_end]')
+            LOGGER.info(
+                f'{error_start_marker}{error_info_json}{error_end_marker}')
+
         if sf:
             if sf.rest_requests_attempted > 0:
                 LOGGER.debug(

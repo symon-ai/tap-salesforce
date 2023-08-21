@@ -5,6 +5,7 @@ from singer import Transformer, metadata, metrics
 from singer import SingerSyncError
 from requests.exceptions import RequestException
 from tap_salesforce.salesforce.bulk import Bulk
+from tap_salesforce.salesforce.exceptions import SymonException
 
 LOGGER = singer.get_logger()
 
@@ -122,10 +123,26 @@ def sync_stream(sf, catalog_entry, state):
             raise Exception("{} Response: {}, (Stream: {})".format(
                 ex, ex.response.text, stream)) from ex
         except Exception as ex:
-            if "OPERATION_TOO_LARGE: exceeded 100000 distinct who/what's" in str(ex):
+            message = str(ex)
+            if "OPERATION_TOO_LARGE: exceeded 100000 distinct who/what's" in message:
                 raise SingerSyncError("OPERATION_TOO_LARGE: exceeded 100000 distinct who/what's. " +
                                       "Consider asking your Salesforce System Administrator to provide you with the " +
                                       "`View All Data` profile permission. (Stream: {})".format(stream)) from ex
+            if "Failed to process query: INVALID_FIELD" in message and "No such column" in message and "on entity" in message:
+                column, entity = None, None
+                try:
+                    # error message in form of: No such column '<column>' on entity '<entity>.'.
+                    # for multiple columns, the error message still includes only the first column.
+                    core_message = message[message.index(
+                        "No such column"):].split(" ")
+                    column = core_message[3].replace("'", '"')
+                    entity = core_message[6].replace("'", '"')[:-1]
+                except:
+                    pass
+                if column is not None and entity is not None:
+                    raise SymonException(
+                        f'We can\'t find {column} column on {entity} {sf.source_type}. Review the Field Level Permissions in Salesforce and try importing your data again.', 'salesforce.InvalidField')
+
             raise Exception("{}, (Stream: {})".format(
                 ex, stream)) from ex
 
