@@ -1,3 +1,4 @@
+import re
 import time
 import singer
 import singer.utils as singer_utils
@@ -5,6 +6,7 @@ from singer import Transformer, metadata, metrics
 from singer import SingerSyncError
 from requests.exceptions import RequestException
 from tap_salesforce.salesforce.bulk import Bulk
+from tap_salesforce.salesforce.exceptions import SymonException
 
 LOGGER = singer.get_logger()
 
@@ -122,10 +124,39 @@ def sync_stream(sf, catalog_entry, state):
             raise Exception("{} Response: {}, (Stream: {})".format(
                 ex, ex.response.text, stream)) from ex
         except Exception as ex:
-            if "OPERATION_TOO_LARGE: exceeded 100000 distinct who/what's" in str(ex):
+            message = str(ex)
+            if "OPERATION_TOO_LARGE: exceeded 100000 distinct who/what's" in message:
                 raise SingerSyncError("OPERATION_TOO_LARGE: exceeded 100000 distinct who/what's. " +
                                       "Consider asking your Salesforce System Administrator to provide you with the " +
                                       "`View All Data` profile permission. (Stream: {})".format(stream)) from ex
+            if "Failed to process query: INVALID_FIELD" in message and "No such column" in message and "on entity" in message:
+                column, entity = None, None
+                try:
+                    # error message in form of: No such column '<column>' on entity '<entity>.'.
+                    # for multiple columns, the error message still includes only the first column.
+                    core_message = message[message.index(
+                        "No such column"):].split(" ")
+                    column = core_message[3].replace("'", '"')
+                    entity = core_message[6].replace("'", '"')[:-1]
+                except:
+                    pass
+                if column is not None and entity is not None:
+                    raise SymonException(
+                        f'We can\'t find {column} column on {entity} {sf.source_type}. Review the Field Level Permissions in Salesforce and try importing your data again.', 'salesforce.InvalidField')
+
+            match = re.search(
+                "value of filter criterion for field '([A-Za-z0-9_]*)' must be of type ([A-Za-z0-9]*)", message)
+            if match is not None:
+                # Get filter value from error message
+                field_name = match.group(1)
+                operand_value_match = re.search(
+                    f"\({field_name} .* (.*?)\)", message)
+                if operand_value_match is not None:
+                    raise SymonException(
+                        f"Invalid filter: Field {field_name} filter value of {operand_value_match.group(1)} does not match field type of {match.group(2)}", 'salesforce.InvalidFilter')
+                raise SymonException(
+                    f"Invalid filter: Value of filter criterion for field '{field_name}' is of invalid type", 'salesforce.InvalidFilter')
+
             raise Exception("{}, (Stream: {})".format(
                 ex, stream)) from ex
 

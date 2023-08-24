@@ -1,6 +1,6 @@
 import re
 import threading
-import time
+from datetime import datetime, timezone
 import backoff
 import requests
 from requests.exceptions import RequestException
@@ -227,7 +227,8 @@ class Salesforce():
                  api_type=None,
                  source_type=None,
                  object_name=None,
-                 report_id=None):
+                 report_id=None,
+                 filters=None):
         self.api_type = api_type.upper() if api_type else None
         self.refresh_token = refresh_token
         self.token = token
@@ -258,6 +259,7 @@ class Salesforce():
         self.source_type = source_type if source_type else None
         self.object_name = object_name if object_name else None
         self.report_id = report_id if report_id else None
+        self.filters = filters if filters else None
 
         # validate start_date
         singer_utils.strptime(default_start_date)
@@ -457,6 +459,11 @@ class Salesforce():
         catalog_metadata = metadata.to_map(catalog_entry['metadata'])
         replication_key = catalog_metadata.get((), {}).get('replication-key')
 
+        if (self.filters):
+            source_column_types = catalog_entry.get('source_column_types', {})
+            extra = self.filter_sql(self.filters, source_column_types)
+            where_clauses.append(extra)
+
         if replication_key:
             where_clauses.append("{} >= {} ".format(
                 replication_key,
@@ -513,3 +520,79 @@ class Salesforce():
             raise TapSalesforceException(
                 "api_type should be REST or BULK was: {}".format(
                     self.api_type))
+
+    def filter_sql(self, filter, source_col_types):
+        if (filter["filterType"] == "statement"):
+            return self.filter_statement_sql(filter, source_col_types)
+        else:
+            filters = filter["filters"]
+
+            group_filters_sql = []
+            for f in filters:
+                child_sql = self.filter_sql(f, source_col_types)
+                if child_sql is not None:
+                    group_filters_sql.append(child_sql)
+
+            if len(group_filters_sql) > 0:
+                group_op_sql = " {} ".format(filter["op"])
+                return "({})".format(group_op_sql.join(group_filters_sql))
+            else:
+                return None
+
+    def filter_statement_sql(self, statement, source_col_types):
+        lhs_sql = self.filter_operand_sql(statement["lhs"])
+        op_sql = self.filter_op_sql(statement["op"])
+
+        if "rhs" in statement:
+            rhs_sql = self.filter_operand_sql(statement["rhs"])
+
+            if statement["rhs"].get("litType") == 'date':
+                # Salesforce has date and datetime columns. Only datetime columns can include time, or query will throw an error
+                if source_col_types.get(lhs_sql) == 'datetime':
+                    # salesforce only store date in utc and needs Z at the end instead of +00:00, our filters need to match that
+                    rhs_sql = f"{datetime.fromisoformat(rhs_sql).replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z')}"
+                return f"({lhs_sql} {op_sql} {rhs_sql})"
+            if statement["rhs"].get("litType") == 'number':
+                if source_col_types.get(lhs_sql) in ('int', 'long'):
+                    # float first in case string value contains decimals
+                    rhs_sql = int(float(rhs_sql))
+                return f"({lhs_sql} {op_sql} {rhs_sql})"
+            if statement["rhs"].get("litType") == 'boolean':
+                return f"({lhs_sql} {op_sql} {rhs_sql})"
+            if statement["op"] == "starts_with":
+                return f"({lhs_sql} {op_sql} '{rhs_sql}%')"
+            if statement["op"] == "ends_with":
+                return f"({lhs_sql} {op_sql} '%{rhs_sql}')"
+            if statement["op"] == "contains" or statement["op"] == "not_contains":
+                return f"({lhs_sql} {op_sql} '%{rhs_sql}%')"
+
+            return f"({lhs_sql} {op_sql} '{rhs_sql}')"
+        else:
+            return f"({lhs_sql} {op_sql})"
+
+    def filter_operand_sql(self, operand):
+        if operand["operandType"] == "column":
+            return operand['name']
+        else:
+            return operand['value']
+
+    def filter_op_sql(self, op):
+        ops = {
+            "less_than": "<",
+            "less_than_equals": "<=",
+            "equals": "=",
+            "not_equals": "!=",
+            "greater_than_equals": ">=",
+            "greater_than": ">",
+            "is_null": "= null",
+            "is_not_null": "!= null",
+            "starts_with": "LIKE",
+            "ends_with": "LIKE",
+            "contains": "LIKE",
+            "not_contains": "NOT LIKE"
+        }
+
+        return ops[op]
+
+    def sql_esc_cname(self, cname):
+        return f"'{cname}'" if "'" in cname else cname
