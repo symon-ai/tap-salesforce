@@ -40,6 +40,10 @@ FORCED_FULL_TABLE = {
     'ReportEvent',
 }
 
+# for symon error logging
+ERROR_START_MARKER = '[tap_error_start]'
+ERROR_END_MARKER = '[tap_error_end]'
+
 
 def get_replication_key(sobject_name, fields):
     if sobject_name in FORCED_FULL_TABLE:
@@ -602,21 +606,27 @@ def main_impl():
         raise
     finally:
         if error_info is not None:
-            error_file_path = args.config.get('error_file_path', None)
-            if error_file_path is not None:
-                try:
-                    with open(error_file_path, 'w', encoding='utf-8') as fp:
-                        json.dump(error_info, fp)
-                except:
-                    pass
-            # log error info as well in case file is corrupted
-            error_info_json = json.dumps(error_info)
-            error_start_marker = args.config.get(
-                'error_start_marker', '[tap_error_start]')
-            error_end_marker = args.config.get(
-                'error_end_marker', '[tap_error_end]')
-            LOGGER.info(
-                f'{error_start_marker}{error_info_json}{error_end_marker}')
+            try:
+                error_file_path = args.config.get('error_file_path', None)
+                if error_file_path is not None:
+                    try:
+                        with open(error_file_path, 'w', encoding='utf-8') as fp:
+                            json.dump(error_info, fp)
+                    except:
+                        pass
+                # log error info as well in case file is corrupted
+                error_info_json = json.dumps(error_info)
+                error_start_marker = args.config.get(
+                    'error_start_marker', ERROR_START_MARKER)
+                error_end_marker = args.config.get(
+                    'error_end_marker', ERROR_END_MARKER)
+                LOGGER.info(
+                    f'{error_start_marker}{error_info_json}{error_end_marker}')
+            except:
+                # error occurred before args was parsed correctly, log the error
+                error_info_json = json.dumps(error_info)
+                LOGGER.info(
+                    f'{ERROR_START_MARKER}{error_info_json}{ERROR_END_MARKER}')
 
         if sf:
             if sf.rest_requests_attempted > 0:
