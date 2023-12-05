@@ -120,6 +120,8 @@ def sync_stream(sf, catalog_entry, state):
             elif sf.source_type == 'report':
                 sync_report(sf, catalog_entry, state, counter)
             singer.write_state(state)
+        except SymonException as ex:
+            raise
         except RequestException as ex:
             raise Exception("{} Response: {}, (Stream: {})".format(
                 ex, ex.response.text, stream)) from ex

@@ -13,7 +13,8 @@ from tap_salesforce.salesforce.rest import Rest
 from tap_salesforce.salesforce.report_rest import ReportRest
 from tap_salesforce.salesforce.exceptions import (
     TapSalesforceException,
-    TapSalesforceQuotaExceededException)
+    TapSalesforceQuotaExceededException,
+    SymonException)
 
 LOGGER = singer.get_logger()
 
@@ -360,6 +361,18 @@ class Salesforce():
         try:
             resp.raise_for_status()
         except RequestException as ex:
+            if ex.response is not None:
+                code, message = None, None
+                try: 
+                    resp_json = ex.response.json()
+                    code = resp_json['exceptionCode']
+                    message = resp_json['exceptionMessage']
+                except Exception:
+                    pass
+
+                if code is not None and message is not None:
+                    raise SymonException(f'Import failed with the following Salesforce error: (error code: {code}) {message}', 'salesforce.SalesforceApiError')
+
             raise ex
 
         if resp.headers.get('Sforce-Limit-Info') is not None:
