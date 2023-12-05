@@ -120,9 +120,19 @@ def sync_stream(sf, catalog_entry, state):
             elif sf.source_type == 'report':
                 sync_report(sf, catalog_entry, state, counter)
             singer.write_state(state)
-        except SymonException as ex:
-            raise
         except RequestException as ex:
+            if ex.response is not None:
+                code, message = None, None
+                try: 
+                    resp_json = ex.response.json()
+                    code = resp_json['exceptionCode']
+                    message = resp_json['exceptionMessage']
+                except Exception:
+                    pass
+
+                if code is not None and message is not None:
+                    raise SymonException(f'Import failed with the following Salesforce error: (error code: {code}) {message}', 'salesforce.SalesforceApiError')
+
             raise Exception("{} Response: {}, (Stream: {})".format(
                 ex, ex.response.text, stream)) from ex
         except Exception as ex:
