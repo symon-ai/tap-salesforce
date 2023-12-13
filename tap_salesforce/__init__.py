@@ -12,6 +12,7 @@ from tap_salesforce.salesforce import Salesforce
 from tap_salesforce.salesforce.bulk import Bulk
 from tap_salesforce.salesforce.exceptions import (
     TapSalesforceException, TapSalesforceQuotaExceededException, SymonException)
+from requests.exceptions import RequestException
 
 LOGGER = singer.get_logger()
 
@@ -141,10 +142,30 @@ def create_report_property_schema(field_name, field, mdata, source_type):
 
 # pylint: disable=too-many-branches,too-many-statements
 def do_discover(sf):
-    if sf.source_type == 'object':
-        do_discover_object(sf)
-    elif sf.source_type == 'report':
-        do_discover_report(sf)
+    try:
+        if sf.source_type == 'object':
+            do_discover_object(sf)
+        elif sf.source_type == 'report':
+            do_discover_report(sf)
+    except RequestException as ex:
+        if ex.response is not None:
+            code, message = None, None
+            try: 
+                resp_json = ex.response.json()
+                if isinstance(resp_json, list):
+                    resp_json = resp_json[0]
+
+                code = resp_json.get('exceptionCode', None) or resp_json.get('errorCode', None)
+                message = resp_json.get('exceptionMessage', None) or resp_json.get('message', None)
+            except Exception:
+                pass
+
+            if code is not None and message is not None:
+                raise SymonException(f'Import failed with the following Salesforce error: (error code: {code}) {message}', 'salesforce.SalesforceApiError')
+            raise Exception("{} Response: {})".format(
+                    ex, ex.response.text)) from ex
+
+        raise
 
 
 def do_discover_report(sf):

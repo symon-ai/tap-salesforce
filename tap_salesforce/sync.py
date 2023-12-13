@@ -125,16 +125,20 @@ def sync_stream(sf, catalog_entry, state):
                 code, message = None, None
                 try: 
                     resp_json = ex.response.json()
-                    code = resp_json['exceptionCode']
-                    message = resp_json['exceptionMessage']
+                    if isinstance(resp_json, list):
+                        resp_json = resp_json[0]
+
+                    code = resp_json.get('exceptionCode', None) or resp_json.get('errorCode', None)
+                    message = resp_json.get('exceptionMessage', None) or resp_json.get('message', None)
                 except Exception:
                     pass
 
                 if code is not None and message is not None:
                     raise SymonException(f'Import failed with the following Salesforce error: (error code: {code}) {message}', 'salesforce.SalesforceApiError')
-
-            raise Exception("{} Response: {}, (Stream: {})".format(
-                ex, ex.response.text, stream)) from ex
+                raise Exception("{} Response: {}, (Stream: {})".format(
+                    ex, ex.response.text, stream)) from ex
+            
+            raise
         except Exception as ex:
             message = str(ex)
             if "OPERATION_TOO_LARGE: exceeded 100000 distinct who/what's" in message:
