@@ -302,8 +302,8 @@ class Salesforce():
         percent_used_from_total = (remaining / allotted) * 100
         max_requests_for_run = int(
             (self.quota_percent_per_run * allotted) / 100)
-
-        if percent_used_from_total > self.quota_percent_total:
+        LOGGER.info("THROW AN ERRORRR", remaining, allotted)
+        if percent_used_from_total > 0:
             total_message = ("Salesforce has reported {}/{} ({:3.2f}%) total REST quota " +
                              "used across all Salesforce Applications. Terminating " +
                              "replication to not continue past configured percentage " +
@@ -331,6 +331,7 @@ class Salesforce():
     def _make_request(self, http_method, url, headers=None, body=None, stream=False, params=None):
         request_timeout = 5 * 60  # 5 minute request timeout
         try:
+            self.check_rest_quota_usage(resp.headers)
             if http_method == "GET":
                 LOGGER.info("Making %s request to %s with params: %s",
                             http_method, url, params)
