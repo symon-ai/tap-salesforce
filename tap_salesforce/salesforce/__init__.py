@@ -289,6 +289,14 @@ class Salesforce():
 
     # pylint: disable=anomalous-backslash-in-string,line-too-long
     def check_rest_quota_usage(self, headers):
+        total_message = ("Salesforce has reported {}/{} ({:3.2f}%) total REST quota " +
+                             "used across all Salesforce Applications. Terminating " +
+                             "replication to not continue past configured percentage " +
+                             "of {}% total quota.").format(remaining,
+                                                           allotted,
+                                                           percent_used_from_total,
+                                                           self.quota_percent_total)
+        raise TapSalesforceQuotaExceededException(total_message)
         match = re.search('^api-usage=(\d+)/(\d+)$',
                           headers.get('Sforce-Limit-Info'))
 
@@ -303,7 +311,7 @@ class Salesforce():
         max_requests_for_run = int(
             (self.quota_percent_per_run * allotted) / 100)
         LOGGER.info("THROW AN ERRORRR", remaining, allotted)
-        if percent_used_from_total > 0:
+        if 1 > 0:
             total_message = ("Salesforce has reported {}/{} ({:3.2f}%) total REST quota " +
                              "used across all Salesforce Applications. Terminating " +
                              "replication to not continue past configured percentage " +
