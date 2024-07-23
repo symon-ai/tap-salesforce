@@ -292,8 +292,8 @@ class Salesforce():
         match = re.search('^api-usage=(\d+)/(\d+)$',
                           headers.get('Sforce-Limit-Info'))
 
-        # if match is None:
-        #     return
+        if match is None:
+            return
 
         remaining, allotted = map(int, match.groups())
 
@@ -362,10 +362,10 @@ class Salesforce():
         except RequestException as ex:
             raise ex
         
-        self.check_rest_quota_usage(resp.headers)
         if resp.headers.get('Sforce-Limit-Info') is not None:
             self.rest_requests_attempted += 1
-
+            self.check_rest_quota_usage(resp.headers)
+            
         return resp
 
     def login(self):
