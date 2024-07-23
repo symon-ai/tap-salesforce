@@ -12,8 +12,8 @@ from tap_salesforce.salesforce.bulk import Bulk
 from tap_salesforce.salesforce.rest import Rest
 from tap_salesforce.salesforce.report_rest import ReportRest
 from tap_salesforce.salesforce.exceptions import (
-    TapSalesforceException,
-    TapSalesforceQuotaExceededException)
+    SymonException,
+    TapSalesforceException)
 
 LOGGER = singer.get_logger()
 
@@ -311,7 +311,7 @@ class Salesforce():
                                                            allotted,
                                                            percent_used_from_total,
                                                            self.quota_percent_total)
-            raise TapSalesforceQuotaExceededException(total_message)
+            raise SymonException(total_message, 'salesforce.SalesforceApiError') 
         elif self.rest_requests_attempted > max_requests_for_run:
             partial_message = ("This replication job has made {} REST requests ({:3.2f}% of " +
                                "total quota). Terminating replication due to allotted " +
@@ -319,7 +319,7 @@ class Salesforce():
                                                                        (self.rest_requests_attempted /
                                                                         allotted) * 100,
                                                                        self.quota_percent_per_run)
-            raise TapSalesforceQuotaExceededException(partial_message)
+            raise SymonException(partial_message, 'salesforce.SalesforceApiError') 
 
     # pylint: disable=too-many-arguments
     @backoff.on_exception(backoff.expo,
