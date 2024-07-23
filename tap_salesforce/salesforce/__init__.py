@@ -289,14 +289,6 @@ class Salesforce():
 
     # pylint: disable=anomalous-backslash-in-string,line-too-long
     def check_rest_quota_usage(self, headers):
-        total_message = ("Salesforce has reported {}/{} ({:3.2f}%) total REST quota " +
-                             "used across all Salesforce Applications. Terminating " +
-                             "replication to not continue past configured percentage " +
-                             "of {}% total quota.").format(remaining,
-                                                           allotted,
-                                                           percent_used_from_total,
-                                                           self.quota_percent_total)
-        raise TapSalesforceQuotaExceededException(total_message)
         match = re.search('^api-usage=(\d+)/(\d+)$',
                           headers.get('Sforce-Limit-Info'))
 
@@ -310,8 +302,8 @@ class Salesforce():
         percent_used_from_total = (remaining / allotted) * 100
         max_requests_for_run = int(
             (self.quota_percent_per_run * allotted) / 100)
-        LOGGER.info("THROW AN ERRORRR", remaining, allotted)
-        if 1 > 0:
+
+        if percent_used_from_total > self.quota_percent_total:
             total_message = ("Salesforce has reported {}/{} ({:3.2f}%) total REST quota " +
                              "used across all Salesforce Applications. Terminating " +
                              "replication to not continue past configured percentage " +
@@ -347,17 +339,14 @@ class Salesforce():
                                         stream=stream,
                                         params=params,
                                         timeout=request_timeout,)
-                self.check_rest_quota_usage(resp.headers)
             elif http_method == "POST":
                 LOGGER.info("Making %s request to %s with body %s",
                             http_method, url, body)
-                self.check_rest_quota_usage(resp.headers)
                 resp = self.session.post(url,
                                          headers=headers,
                                          data=body,
                                          timeout=request_timeout,)
             else:
-                self.check_rest_quota_usage(resp.headers)
                 raise TapSalesforceException("Unsupported HTTP method")
         except requests.exceptions.ConnectionError as connection_err:
             LOGGER.error(
