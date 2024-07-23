@@ -339,7 +339,6 @@ class Salesforce():
     def _make_request(self, http_method, url, headers=None, body=None, stream=False, params=None):
         request_timeout = 5 * 60  # 5 minute request timeout
         try:
-            self.check_rest_quota_usage(resp.headers)
             if http_method == "GET":
                 LOGGER.info("Making %s request to %s with params: %s",
                             http_method, url, params)
@@ -348,14 +347,17 @@ class Salesforce():
                                         stream=stream,
                                         params=params,
                                         timeout=request_timeout,)
+                self.check_rest_quota_usage(resp.headers)
             elif http_method == "POST":
                 LOGGER.info("Making %s request to %s with body %s",
                             http_method, url, body)
+                self.check_rest_quota_usage(resp.headers)
                 resp = self.session.post(url,
                                          headers=headers,
                                          data=body,
                                          timeout=request_timeout,)
             else:
+                self.check_rest_quota_usage(resp.headers)
                 raise TapSalesforceException("Unsupported HTTP method")
         except requests.exceptions.ConnectionError as connection_err:
             LOGGER.error(
