@@ -306,7 +306,7 @@ class Salesforce():
         if percent_used_from_total > self.quota_percent_total:
             total_message = ("Salesforce has reported {}/{} ({:3.2f}%) total REST quota " +
                              "used across all Salesforce Applications. Terminating " +
-                             "replication to not continue past configured percentage " +
+                             "replication to not continue past the configured percentage " +
                              "of {}% total quota.").format(remaining,
                                                            allotted,
                                                            percent_used_from_total,
