@@ -303,7 +303,7 @@ class Salesforce():
         max_requests_for_run = int(
             (self.quota_percent_per_run * allotted) / 100)
 
-        if percent_used_from_total > 0: 
+        if percent_used_from_total > self.quota_percent_total:
             total_message = ("Salesforce has reported {}/{} ({:3.2f}%) total REST quota " +
                              "used across all Salesforce Applications. Terminating " +
                              "replication to not continue past configured percentage " +
@@ -361,11 +361,9 @@ class Salesforce():
             resp.raise_for_status()
         except RequestException as ex:
             raise ex
-        
         if resp.headers.get('Sforce-Limit-Info') is not None:
             self.rest_requests_attempted += 1
             self.check_rest_quota_usage(resp.headers)
-            
         return resp
 
     def login(self):
