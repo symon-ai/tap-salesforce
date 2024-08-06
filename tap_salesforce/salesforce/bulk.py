@@ -82,7 +82,7 @@ class Bulk():
         if percent_used > self.sf.quota_percent_total:
             total_message = ("Salesforce has reported {}/{} ({:3.2f}%) total Bulk API quota " +
                              "used across all Salesforce Applications. Terminating " +
-                             "replication to not continue past configured percentage " +
+                             "replication to not continue past the configured percentage " +
                              "of {}% total quota.").format(quota_max - quota_remaining,
                                                            quota_max,
                                                            percent_used,
