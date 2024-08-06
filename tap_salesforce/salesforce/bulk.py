@@ -12,7 +12,7 @@ from requests.exceptions import RequestException
 import xmltodict
 
 from tap_salesforce.salesforce.exceptions import (
-    TapSalesforceException, TapSalesforceQuotaExceededException)
+    SymonException, TapSalesforceException)
 
 BATCH_STATUS_POLLING_SLEEP = 20
 PK_CHUNKED_BATCH_STATUS_POLLING_SLEEP = 60
@@ -82,19 +82,19 @@ class Bulk():
         if percent_used > self.sf.quota_percent_total:
             total_message = ("Salesforce has reported {}/{} ({:3.2f}%) total Bulk API quota " +
                              "used across all Salesforce Applications. Terminating " +
-                             "replication to not continue past configured percentage " +
+                             "replication to not continue past the configured percentage " +
                              "of {}% total quota.").format(quota_max - quota_remaining,
                                                            quota_max,
                                                            percent_used,
                                                            self.sf.quota_percent_total)
-            raise TapSalesforceQuotaExceededException(total_message)
+            raise SymonException(total_message)
         elif self.sf.jobs_completed > max_requests_for_run:
             partial_message = ("This replication job has completed {} Bulk API jobs ({:3.2f}% of " +
                                "total quota). Terminating replication due to allotted " +
                                "quota of {}% per replication.").format(self.sf.jobs_completed,
                                                                        (self.sf.jobs_completed / quota_max) * 100,
                                                                        self.sf.quota_percent_per_run)
-            raise TapSalesforceQuotaExceededException(partial_message)
+            raise SymonException(partial_message)
 
     def _get_bulk_headers(self):
         return {"X-SFDC-Session": self.sf.access_token,
