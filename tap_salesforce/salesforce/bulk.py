@@ -87,14 +87,14 @@ class Bulk():
                                                            quota_max,
                                                            percent_used,
                                                            self.sf.quota_percent_total)
-            raise SymonException(total_message)
+            raise SymonException(total_message, 'salesforce.SalesforceApiError')
         elif self.sf.jobs_completed > max_requests_for_run:
             partial_message = ("This replication job has completed {} Bulk API jobs ({:3.2f}% of " +
                                "total quota). Terminating replication due to allotted " +
                                "quota of {}% per replication.").format(self.sf.jobs_completed,
                                                                        (self.sf.jobs_completed / quota_max) * 100,
                                                                        self.sf.quota_percent_per_run)
-            raise SymonException(partial_message)
+            raise SymonException(partial_message, 'salesforce.SalesforceApiError')
 
     def _get_bulk_headers(self):
         return {"X-SFDC-Session": self.sf.access_token,
