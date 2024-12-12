@@ -609,6 +609,7 @@ def main_impl():
             do_sync(sf, catalog, state)
     except SymonException as e:
         exc_type, exc_value, exc_traceback = sys.exc_info()
+        
         error_info = {
             'message': traceback.format_exception_only(exc_type, exc_value)[-1],
             'code': e.code,
@@ -623,7 +624,7 @@ def main_impl():
         error_info = {
             'message': traceback.format_exception_only(exc_type, exc_value)[-1],
             'traceback': "".join(traceback.format_tb(exc_traceback))
-        }
+        }        
         raise
     finally:
         if error_info is not None:

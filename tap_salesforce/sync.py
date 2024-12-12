@@ -141,6 +141,11 @@ def sync_stream(sf, catalog_entry, state):
             raise
         except Exception as ex:
             message = str(ex)
+            if any(phrase in message for phrase in (
+                "total REST quota used across all Salesforce Applications",
+                "Terminating replication due to allotted"
+            )):
+                raise
             if "OPERATION_TOO_LARGE: exceeded 100000 distinct who/what's" in message:
                 raise SingerSyncError("OPERATION_TOO_LARGE: exceeded 100000 distinct who/what's. " +
                                       "Consider asking your Salesforce System Administrator to provide you with the " +
