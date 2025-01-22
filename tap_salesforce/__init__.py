@@ -135,7 +135,7 @@ def create_report_property_schema(field_name, field, mdata, source_type):
         mdata, ('properties', field_name), 'inclusion', 'available')
 
     property_schema, mdata = salesforce.field_to_property_schema(
-        field, mdata, source_type)
+        field, mdata, source_type, True)
 
     return (property_schema, mdata)
 
