@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tap-salesforce"
-version = "3.1.0"
+version = "3.3.0"
 description = "Singer.io tap for extracting data from the Salesforce API"
 authors = ["Stitch"]
 homepage = "https://singer.io"
