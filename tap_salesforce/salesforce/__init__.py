@@ -46,7 +46,7 @@ NUMBER_TYPES = set([
 
 NUMBER_OR_STRING_TYPES = set([
     'currency',  # currency types could include the currency iso code if the salesforce org has multicurrency enabled
-    'percent'  # For some objects/reports, percentages include the actual '%' character, requiring the whole value to be treated as a string. For others, it's just the number
+    # 'percent'  # For some objects/reports, percentages include the actual '%' character, requiring the whole value to be treated as a string. For others, it's just the number
 ])
 
 DATE_TYPES = set([
@@ -147,7 +147,7 @@ def log_backoff_attempt(details):
         "ConnectionError detected, triggering backoff: %d try", details.get("tries"))
 
 
-def field_to_property_schema(field, mdata, source_type):  # pylint:disable=too-many-branches
+def field_to_property_schema(field, mdata, source_type, is_report=False):  # pylint:disable=too-many-branches
     property_schema = {}
 
     if source_type == 'report':
@@ -168,6 +168,9 @@ def field_to_property_schema(field, mdata, source_type):  # pylint:disable=too-m
         property_schema['type'] = ["number", "string", "null"]
     elif sf_type in NUMBER_TYPES:
         property_schema['type'] = "number"
+    elif sf_type == "percent":
+        # percent type field in SF Object returns numeric value without %, but SF Report returns numeric value with %
+        property_schema['type'] = "string" if is_report else "number"
     elif sf_type == "address":
         property_schema['type'] = "object"
         property_schema['properties'] = {
