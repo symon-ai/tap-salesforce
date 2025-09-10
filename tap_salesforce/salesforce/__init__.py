@@ -256,7 +256,7 @@ class Salesforce():
         self.rest_requests_attempted = 0
         self.jobs_completed = 0
         self.login_timer = None
-        self.data_url = "{}/services/data/v52.0/{}"
+        self.data_url = "{}/services/data/v54.0/{}"
         self.pk_chunking = False
 
         self.source_type = source_type if source_type else None
