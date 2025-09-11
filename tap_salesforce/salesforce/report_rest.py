@@ -43,8 +43,30 @@ class ReportRest():
             resp = self.sf._make_request(
                 'POST', url, headers=headers, body=json.dumps(body))
             resp_json = resp.json()
-            # T!T rows feature only exists when detail feature is selected in salesforce reports
-            report_results = resp_json.get('factMap').get("T!T").get('rows')
+            
+            # Handle different factMap structures for regular vs joined reports
+            fact_map = resp_json.get('factMap', {})
+            report_results = None
+            
+            LOGGER.debug("Report factMap keys: %s", list(fact_map.keys()))
+            
+            # For regular reports, use T!T key
+            if "T!T" in fact_map:
+                report_results = fact_map.get("T!T", {}).get('rows')
+                LOGGER.debug("Using T!T key for regular report")
+            else:
+                # For joined reports, look for any available factMap entries
+                # Joined reports use different keys (like "0!T", "1!T", etc.)
+                LOGGER.debug("T!T key not found, treating as joined report")
+                for key, value in fact_map.items():
+                    if isinstance(value, dict) and 'rows' in value:
+                        LOGGER.debug("Found rows in factMap key: %s", key)
+                        if report_results is None:
+                            report_results = value.get('rows')
+                        else:
+                            # For joined reports with multiple blocks, concatenate rows
+                            report_results.extend(value.get('rows', []))
+            
             detail_column_info = resp_json.get(
                 'reportExtendedMetadata').get('detailColumnInfo')
             detail_columns = resp_json.get(
@@ -64,7 +86,10 @@ class ReportRest():
         # WP-9908, the error message will be handled in WP-10193
         if report_results == None:
             raise Exception(
-                "The Report response is missing the rows feature in factMap, check that the Detail Rows toggle is true in the report settings")
+                "The Report response is missing the rows feature in factMap. This could be due to: "
+                "1) Detail Rows toggle not being enabled in the report settings, "
+                "2) Joined report structure not being properly handled, or "
+                "3) Report permissions/access issues. Please check the report configuration and permissions.")
 
         # Transform and cleanup results
         results = []
