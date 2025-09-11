@@ -180,7 +180,30 @@ def do_discover_report(sf):
     print(report_description)
     report_name = report_description['attributes']['reportName']
     print(report_name)
-    fields = report_description['reportExtendedMetadata']['detailColumnInfo']
+    
+    # Debug: Print report type information
+    report_metadata = report_description.get('reportMetadata', {})
+    report_type_info = report_metadata.get('reportType', {})
+    print(f"Report type: {report_type_info}")
+    print(f"Report extended metadata keys: {list(report_description.get('reportExtendedMetadata', {}).keys())}")
+    
+    # Check if this is a joined report - joined reports may have different API response structure
+    report_type = report_type_info.get('type', '')
+    is_joined_report = 'joined' in report_type.lower()
+    if is_joined_report:
+        LOGGER.warning(f'Report "{report_name}" (ID: {sf.report_id}) is a joined report. Joined reports may have limitations in the Salesforce Reports API.')
+    
+    # Check if detailColumnInfo exists - it might be missing for certain report types
+    report_extended_metadata = report_description.get('reportExtendedMetadata', {})
+    if 'detailColumnInfo' not in report_extended_metadata:
+        raise SymonException(
+            f'Report "{report_name}" (ID: {sf.report_id}) does not have detail column information available. '
+            'This could be due to report type limitations or missing "Detail Rows" configuration. '
+            'Please ensure the report has detail rows enabled and is a supported report type.',
+            'salesforce.ReportDetailColumnsMissing'
+        )
+    
+    fields = report_extended_metadata['detailColumnInfo']
 
     unsupported_fields = set()
     properties = {}
