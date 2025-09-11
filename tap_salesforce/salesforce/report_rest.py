@@ -33,7 +33,7 @@ class ReportRest():
             report_metadata,
             catalog_entry):
         body = {"reportMetadata": report_metadata['reportMetadata']}
-        url = f'{self.sf.instance_url}/services/data/v48.0/analytics/reports/query'
+        url = f'{self.sf.instance_url}/services/data/v54.0/analytics/reports/query'
 
         headers = self.sf._get_report_query_headers()
 
