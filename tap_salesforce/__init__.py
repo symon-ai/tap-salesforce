@@ -175,16 +175,17 @@ def do_discover_report(sf):
 
     # For each SF Report describe it, loop its fields and build a schema
     entries = []
-
+    print("INFO HERE DGOMEZ")
     report_description = sf.describe()
-
+    print(report_description)
     report_name = report_description['attributes']['reportName']
+    print(report_name)
     fields = report_description['reportExtendedMetadata']['detailColumnInfo']
 
     unsupported_fields = set()
     properties = {}
     mdata = metadata.new()
-
+    print(fields)
     # Loop over the report's fields
     for field_name, field in fields.items():
         property_schema, mdata = create_report_property_schema(
