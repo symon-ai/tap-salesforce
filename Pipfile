@@ -4,15 +4,23 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-certifi = ">=2021.10.8"
-idna = ">=3.7"
-requests = ">=2.32.0, <3.0.0"
-singer-python = "==5.10.0"
-urllib3 = ">=1.26.18, <2.0.0"
-xmltodict = "==0.11.0, <0.12.0"
+backoff = {version = "==2.2.1", markers = "python_full_version >= \"3.13.0\" and python_version < \"4.0\""}
+certifi = {version = "==2026.1.4", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+charset-normalizer = {version = "==3.4.4", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+ciso8601 = {version = "==2.3.3", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+idna = {version = "==3.11", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+jsonschema = {version = "==2.6.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+python-dateutil = {version = "==2.9.0.post0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+pytz = {version = "==2025.2", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+requests = {version = "==2.32.5", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+simplejson = {version = "==3.20.2", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+singer-python = {version = "==6.3.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+six = {version = "==1.17.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+urllib3 = {version = "==2.6.3", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+xmltodict = {version = "==1.0.2", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
 
 [dev-packages]
-autopep8 = ">=1.6.0, <2.0.0"
 
 [requires]
-python_version = ">=3.8.10, <4.0.0"
+python_version = "3.13"
+python_full_version = "3.13.3"

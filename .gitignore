@@ -98,3 +98,4 @@ config.json
 .autoenv.zsh
 
 *~
+requirements.txt

@@ -547,6 +547,7 @@ class Salesforce():
         if "rhs" in statement:
             rhs_sql = self.filter_operand_sql(statement["rhs"])
 
+<<<<<<< Updated upstream
             if statement["rhs"].get("litType") == 'date':
                 # Salesforce has date and datetime columns. Only datetime columns can include time, or query will throw an error
                 if source_col_types.get(lhs_sql) == 'datetime':
@@ -559,6 +560,9 @@ class Salesforce():
                     rhs_sql = int(float(rhs_sql))
                 return f"({lhs_sql} {op_sql} {rhs_sql})"
             if statement["rhs"].get("litType") == 'boolean':
+=======
+            if statement["rhs"].get("litType") == 'date' or statement["rhs"].get("litType") == 'number':
+>>>>>>> Stashed changes
                 return f"({lhs_sql} {op_sql} {rhs_sql})"
             if statement["op"] == "starts_with":
                 return f"({lhs_sql} {op_sql} '{rhs_sql}%')"
