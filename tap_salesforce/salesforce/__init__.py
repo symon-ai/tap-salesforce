@@ -292,7 +292,7 @@ class Salesforce():
 
     # pylint: disable=anomalous-backslash-in-string,line-too-long
     def check_rest_quota_usage(self, headers):
-        match = re.search('^api-usage=(\d+)/(\d+)$',
+        match = re.search(r'^api-usage=(\d+)/(\d+)$',
                           headers.get('Sforce-Limit-Info'))
 
         if match is None:
