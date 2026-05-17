@@ -16,7 +16,7 @@ requests = {version = "==2.33.0", markers = "python_full_version >= \"3.13.0\" a
 simplejson = {version = "==3.20.2", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
 singer-python = {version = "==6.3.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
 six = {version = "==1.17.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-urllib3 = {version = "==2.6.3", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+urllib3 = {version = "==2.7.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
 xmltodict = {version = "==1.0.2", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
 
 [dev-packages]
