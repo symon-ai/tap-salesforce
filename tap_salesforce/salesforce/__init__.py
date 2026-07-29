@@ -13,8 +13,7 @@ from tap_salesforce.salesforce.rest import Rest
 from tap_salesforce.salesforce.report_rest import ReportRest
 from tap_salesforce.salesforce.token_broker import (
     TokenBrokerError,
-    fetch_broker_credentials,
-    get_task_auth_token)
+    fetch_broker_credentials)
 from tap_salesforce.salesforce.exceptions import (
     SymonException,
     TapSalesforceException)
@@ -508,7 +507,7 @@ class Salesforce():
                 credentials = fetch_broker_credentials(
                     endpoint=self.token_broker['endpoint'],
                     reason=reason,
-                    task_auth_token=get_task_auth_token(),
+                    task_auth_token=self.token_broker['task_auth_token'],
                     known_token_version=self._get_known_token_version(),
                     session=self.session)
                 self._set_session_credentials(

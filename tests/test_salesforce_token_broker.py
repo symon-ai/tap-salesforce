@@ -1,5 +1,4 @@
 import json
-import os
 import threading
 import unittest
 from unittest import mock
@@ -10,8 +9,8 @@ from requests.exceptions import HTTPError
 from tap_salesforce import validate_config
 from tap_salesforce.salesforce import Salesforce, REFRESH_TOKEN_EXPIRATION_PERIOD
 from tap_salesforce.salesforce.token_broker import (
+    BROKER_MAX_ATTEMPTS,
     BROKER_REQUEST_TIMEOUT_SECONDS,
-    TASK_AUTH_TOKEN_ENV_VAR,
     TokenBrokerError,
     build_broker_request,
     fetch_broker_credentials,
@@ -84,7 +83,9 @@ class TokenBrokerRequestTests(unittest.TestCase):
         self.assertEqual(credentials['refresh_check_after_seconds'], 1200)
         self.assertEqual(kwargs['timeout'], BROKER_REQUEST_TIMEOUT_SECONDS)
 
-    def test_fetch_broker_credentials_does_not_leak_token_on_failure(self):
+    @mock.patch('tap_salesforce.salesforce.token_broker.time.sleep')
+    def test_fetch_broker_credentials_does_not_leak_token_on_failure(
+            self, mock_sleep):
         session = mock.Mock()
         session.post.side_effect = requests.exceptions.Timeout('timed out')
 
@@ -96,25 +97,97 @@ class TokenBrokerRequestTests(unittest.TestCase):
                 session=session)
 
         self.assertNotIn('secret-task-token', str(ctx.exception))
+        self.assertEqual(session.post.call_count, BROKER_MAX_ATTEMPTS)
+        self.assertEqual(mock_sleep.call_count, BROKER_MAX_ATTEMPTS - 1)
+
+    @mock.patch('tap_salesforce.salesforce.token_broker.time.sleep')
+    def test_fetch_broker_credentials_retries_timeout_then_succeeds(
+            self, mock_sleep):
+        response = mock.Mock()
+        response.json.return_value = {
+            'accessToken': 'sf-access',
+            'instanceUrl': 'https://example.my.salesforce.com',
+            'tokenVersion': 'v2',
+        }
+        response.raise_for_status = mock.Mock()
+
+        session = mock.Mock()
+        session.post.side_effect = [
+            requests.exceptions.Timeout('timed out'),
+            response,
+        ]
+
+        credentials = fetch_broker_credentials(
+            endpoint='https://broker.example/token',
+            reason='startup',
+            task_auth_token='task-token',
+            session=session)
+
+        self.assertEqual(credentials['access_token'], 'sf-access')
+        self.assertEqual(session.post.call_count, 2)
+        mock_sleep.assert_called_once_with(1)
+
+    @mock.patch('tap_salesforce.salesforce.token_broker.time.sleep')
+    def test_fetch_broker_credentials_retries_lock_conflict_with_retry_after(
+            self, mock_sleep):
+        conflict_response = mock.Mock()
+        conflict_response.status_code = 409
+        conflict_response.headers = {'Retry-After': '2'}
+        conflict_response.raise_for_status.side_effect = HTTPError(
+            response=conflict_response)
+
+        success_response = mock.Mock()
+        success_response.json.return_value = {
+            'accessToken': 'sf-access',
+            'instanceUrl': 'https://example.my.salesforce.com',
+            'tokenVersion': 'v2',
+        }
+        success_response.raise_for_status = mock.Mock()
+
+        session = mock.Mock()
+        session.post.side_effect = [conflict_response, success_response]
+
+        credentials = fetch_broker_credentials(
+            endpoint='https://broker.example/token',
+            reason='periodic',
+            task_auth_token='task-token',
+            session=session)
+
+        self.assertEqual(credentials['token_version'], 'v2')
+        self.assertEqual(session.post.call_count, 2)
+        mock_sleep.assert_called_once_with(2)
+
+    @mock.patch('tap_salesforce.salesforce.token_broker.time.sleep')
+    def test_fetch_broker_credentials_does_not_retry_auth_failure(
+            self, mock_sleep):
+        unauthorized_response = mock.Mock()
+        unauthorized_response.status_code = 401
+        unauthorized_response.headers = {}
+        unauthorized_response.raise_for_status.side_effect = HTTPError(
+            response=unauthorized_response)
+
+        session = mock.Mock()
+        session.post.return_value = unauthorized_response
+
+        with self.assertRaises(TokenBrokerError):
+            fetch_broker_credentials(
+                endpoint='https://broker.example/token',
+                reason='startup',
+                task_auth_token='task-token',
+                session=session)
+
+        session.post.assert_called_once()
+        mock_sleep.assert_not_called()
 
 
 class SalesforceBrokerModeTests(unittest.TestCase):
-    def setUp(self):
-        self.env_patch = mock.patch.dict(
-            os.environ,
-            {TASK_AUTH_TOKEN_ENV_VAR: 'task-token'},
-            clear=False)
-        self.env_patch.start()
-
-    def tearDown(self):
-        self.env_patch.stop()
-
     def _broker_salesforce(self):
         return Salesforce(
             **_base_salesforce_kwargs(
                 token_broker={
                     'endpoint': 'https://broker.example/token',
                     'connection_id': 'conn-123',
+                    'task_auth_token': 'task-token',
                 }))
 
     @mock.patch('tap_salesforce.salesforce.threading.Timer')
@@ -398,6 +471,21 @@ class SalesforceBrokerModeTests(unittest.TestCase):
 
 
 class ConfigValidationTests(unittest.TestCase):
+    @staticmethod
+    def _legacy_config(**overrides):
+        config = {
+            'start_date': '2020-01-01T00:00:00Z',
+            'api_type': 'REST',
+            'select_fields_by_default': True,
+            'source_type': 'object',
+            'object_name': 'Account',
+            'refresh_token': 'legacy-refresh',
+            'client_id': 'legacy-client',
+            'client_secret': 'legacy-secret',
+        }
+        config.update(overrides)
+        return config
+
     def test_broker_mode_does_not_require_legacy_auth_keys(self):
         config = {
             'start_date': '2020-01-01T00:00:00Z',
@@ -408,6 +496,7 @@ class ConfigValidationTests(unittest.TestCase):
             'token_broker': {
                 'endpoint': 'https://broker.example/token',
                 'connection_id': 'conn-123',
+                'task_auth_token': 'task-token',
             },
         }
         validate_config(config)
@@ -421,9 +510,25 @@ class ConfigValidationTests(unittest.TestCase):
             'object_name': 'Account',
             'token_broker': {
                 'endpoint': 'https://broker.example/token',
+                'task_auth_token': 'task-token',
             },
         }
         with self.assertRaisesRegex(Exception, 'connection_id'):
+            validate_config(config)
+
+    def test_broker_mode_requires_task_auth_token(self):
+        config = {
+            'start_date': '2020-01-01T00:00:00Z',
+            'api_type': 'REST',
+            'select_fields_by_default': True,
+            'source_type': 'object',
+            'object_name': 'Account',
+            'token_broker': {
+                'endpoint': 'https://broker.example/token',
+                'connection_id': 'conn-123',
+            },
+        }
+        with self.assertRaisesRegex(Exception, 'task_auth_token'):
             validate_config(config)
 
     def test_legacy_mode_requires_refresh_and_client_keys(self):
@@ -436,6 +541,29 @@ class ConfigValidationTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(Exception, 'refresh_token'):
             validate_config(config)
+
+    def test_empty_broker_config_preserves_legacy_mode(self):
+        validate_config(self._legacy_config(token_broker={}))
+
+    def test_null_broker_config_preserves_legacy_mode(self):
+        validate_config(self._legacy_config(token_broker=None))
+
+    def test_non_object_broker_config_is_rejected_clearly(self):
+        with self.assertRaisesRegex(Exception, 'must be an object'):
+            validate_config(self._legacy_config(token_broker='invalid'))
+
+    def test_partial_broker_config_does_not_silently_select_legacy_mode(self):
+        with self.assertRaisesRegex(Exception, 'endpoint'):
+            validate_config(self._legacy_config(
+                token_broker={'connection_id': 'conn-123'}))
+
+    def test_whitespace_broker_endpoint_is_rejected(self):
+        with self.assertRaisesRegex(Exception, 'endpoint'):
+            validate_config(self._legacy_config(token_broker={
+                'endpoint': '   ',
+                'connection_id': 'conn-123',
+                'task_auth_token': 'task-token',
+            }))
 
 
 class TokenBrokerResponseTests(unittest.TestCase):

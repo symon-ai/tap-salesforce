@@ -38,22 +38,32 @@ def validate_config(config):
     if missing_keys:
         raise Exception("Config is missing required keys: {}".format(missing_keys))
 
-    token_broker = config.get('token_broker') or {}
-    broker_endpoint = token_broker.get('endpoint')
-    if broker_endpoint:
-        if not isinstance(token_broker, dict):
-            raise Exception("token_broker must be an object")
-        if not broker_endpoint:
-            raise Exception("token_broker.endpoint is required when token_broker is configured")
-        if not token_broker.get('connection_id'):
-            raise Exception(
-                "token_broker.connection_id is required when token_broker is configured")
-    else:
+    token_broker = config.get('token_broker')
+    if token_broker is None or token_broker == {}:
         missing_auth_keys = [
             key for key in LEGACY_AUTH_CONFIG_KEYS if key not in config]
         if missing_auth_keys:
             raise Exception(
                 "Config is missing required keys: {}".format(missing_auth_keys))
+        return
+
+    if not isinstance(token_broker, dict):
+        raise Exception("token_broker must be an object")
+
+    broker_endpoint = token_broker.get('endpoint')
+    if not isinstance(broker_endpoint, str) or not broker_endpoint.strip():
+        raise Exception(
+            "token_broker.endpoint is required when token_broker is configured")
+
+    connection_id = token_broker.get('connection_id')
+    if not isinstance(connection_id, str) or not connection_id.strip():
+        raise Exception(
+            "token_broker.connection_id is required when token_broker is configured")
+
+    task_auth_token = token_broker.get('task_auth_token')
+    if not isinstance(task_auth_token, str) or not task_auth_token.strip():
+        raise Exception(
+            "token_broker.task_auth_token is required when token_broker is configured")
 
 FORCED_FULL_TABLE = {
     # Does not support ordering by CreatedDate

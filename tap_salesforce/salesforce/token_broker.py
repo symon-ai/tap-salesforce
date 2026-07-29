@@ -1,20 +1,20 @@
 import json
-import os
+import time
 
 import requests
 from requests.exceptions import RequestException
 
-TASK_AUTH_TOKEN_ENV_VAR = 'SYMON_TASK_AUTH_TOKEN'
 BROKER_REQUEST_TIMEOUT_SECONDS = 60
+BROKER_MAX_ATTEMPTS = 3
+BROKER_MAX_RETRY_DELAY_SECONDS = 10
+BROKER_RETRYABLE_STATUS_CODES = frozenset({
+    408, 409, 425, 429, 500, 502, 503, 504,
+})
 BROKER_REASONS = frozenset({'startup', 'periodic', 'invalid_session'})
 
 
 class TokenBrokerError(Exception):
     """Raised when token broker authentication fails."""
-
-
-def get_task_auth_token():
-    return os.environ.get(TASK_AUTH_TOKEN_ENV_VAR)
 
 
 def build_broker_request(endpoint, reason, known_token_version=None):
@@ -53,14 +53,31 @@ def parse_broker_response(response_json):
     }
 
 
+def _get_retry_delay_seconds(response, attempt):
+    if response is not None:
+        retry_after = response.headers.get('Retry-After')
+        if retry_after is not None:
+            try:
+                return min(
+                    max(float(retry_after), 0),
+                    BROKER_MAX_RETRY_DELAY_SECONDS)
+            except (TypeError, ValueError):
+                pass
+
+    return min(2 ** attempt, BROKER_MAX_RETRY_DELAY_SECONDS)
+
+
+def _is_retryable_broker_failure(response):
+    return response is None or response.status_code in BROKER_RETRYABLE_STATUS_CODES
+
+
 def fetch_broker_credentials(endpoint,
                              reason,
                              task_auth_token,
                              known_token_version=None,
                              session=None):
     if not task_auth_token:
-        raise TokenBrokerError(
-            "{} environment variable is required".format(TASK_AUTH_TOKEN_ENV_VAR))
+        raise TokenBrokerError("token_broker.task_auth_token is required")
 
     request = build_broker_request(
         endpoint,
@@ -70,17 +87,34 @@ def fetch_broker_credentials(endpoint,
     headers['Authorization'] = 'TaskAuth {}'.format(task_auth_token)
 
     http = session or requests
-    try:
-        resp = http.post(
-            request['url'],
-            headers=headers,
-            data=request['body'],
-            timeout=BROKER_REQUEST_TIMEOUT_SECONDS)
-        resp.raise_for_status()
-    except RequestException:
-        raise TokenBrokerError("Token broker request failed")
+    for attempt in range(BROKER_MAX_ATTEMPTS):
+        resp = None
+        try:
+            resp = http.post(
+                request['url'],
+                headers=headers,
+                data=request['body'],
+                timeout=BROKER_REQUEST_TIMEOUT_SECONDS)
+            resp.raise_for_status()
+        except RequestException as exc:
+            error_response = getattr(exc, 'response', None)
+            if error_response is None:
+                error_response = resp
 
-    try:
-        return parse_broker_response(resp.json())
-    except (ValueError, TypeError) as exc:
-        raise TokenBrokerError("Token broker returned invalid JSON") from exc
+            can_retry = (
+                attempt + 1 < BROKER_MAX_ATTEMPTS
+                and _is_retryable_broker_failure(error_response)
+            )
+            if not can_retry:
+                raise TokenBrokerError("Token broker request failed") from exc
+
+            time.sleep(_get_retry_delay_seconds(error_response, attempt))
+            continue
+
+        try:
+            return parse_broker_response(resp.json())
+        except (ValueError, TypeError) as exc:
+            raise TokenBrokerError(
+                "Token broker returned invalid JSON") from exc
+
+    raise TokenBrokerError("Token broker request failed")
