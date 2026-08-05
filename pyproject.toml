@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tap-salesforce"
-version = "4.2.0"
+version = "5.0.0"
 description = "Singer.io tap for extracting data from the Salesforce API"
 authors = ["Stitch"]
 homepage = "https://singer.io"
@@ -17,6 +17,9 @@ autopep8 = "^1.6.0"
 
 [tool.poetry.scripts]
 tap-salesforce = "tap_salesforce:main"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.1.1"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

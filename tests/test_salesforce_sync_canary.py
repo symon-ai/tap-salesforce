@@ -20,10 +20,8 @@ class SalesforceSyncCanary(SalesforceBaseTest):
     def get_properties():  # pylint: disable=arguments-differ
         return {
             'start_date' : (datetime.now() + timedelta(days=-1)).strftime("%Y-%m-%dT00:00:00Z"),
-            'instance_url': 'https://singer2-dev-ed.my.salesforce.com',
             'select_fields_by_default': 'true',
             'api_type': 'BULK',
-            'is_sandbox': 'false'
         }
 
     def expected_sync_streams(self):

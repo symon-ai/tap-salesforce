@@ -53,11 +53,9 @@ class SalesforceBaseTest(unittest.TestCase):
         """Configuration properties required for the tap."""
         return_value = {
             'start_date': '2020-11-23T00:00:00Z',
-            'instance_url': 'https://singer2-dev-ed.my.salesforce.com',
             'select_fields_by_default': 'true',
             'quota_percent_total': '80',
             'api_type': self.salesforce_api,
-            'is_sandbox': 'false'
         }
 
         if original:
@@ -72,9 +70,15 @@ class SalesforceBaseTest(unittest.TestCase):
     @staticmethod
     def get_credentials():
         """Authentication information for the test account"""
-        return {'refresh_token': os.getenv('TAP_SALESFORCE_REFRESH_TOKEN'),
-                'client_id': os.getenv('TAP_SALESFORCE_CLIENT_ID'),
-                'client_secret': os.getenv('TAP_SALESFORCE_CLIENT_SECRET')}
+        return {
+            'token_broker': {
+                'endpoint': os.getenv('TAP_SALESFORCE_TOKEN_BROKER_ENDPOINT'),
+                'connection_id': os.getenv(
+                    'TAP_SALESFORCE_TOKEN_BROKER_CONNECTION_ID'),
+                'task_auth_token': os.getenv(
+                    'TAP_SALESFORCE_TOKEN_BROKER_TASK_AUTH_TOKEN'),
+            },
+        }
 
     def expected_metadata(self):
         """The expected streams and metadata about the streams"""

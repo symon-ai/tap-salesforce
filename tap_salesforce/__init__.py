@@ -19,16 +19,10 @@ LOGGER = singer.get_logger()
 REQUIRED_CONFIG_KEYS = ['start_date',
                         'api_type',
                         'select_fields_by_default',
-                        'source_type']
-
-LEGACY_AUTH_CONFIG_KEYS = ['refresh_token',
-                           'client_id',
-                           'client_secret']
+                        'source_type',
+                        'token_broker']
 
 CONFIG = {
-    'refresh_token': None,
-    'client_id': None,
-    'client_secret': None,
     'start_date': None
 }
 
@@ -38,15 +32,7 @@ def validate_config(config):
     if missing_keys:
         raise Exception("Config is missing required keys: {}".format(missing_keys))
 
-    token_broker = config.get('token_broker')
-    if token_broker is None or token_broker == {}:
-        missing_auth_keys = [
-            key for key in LEGACY_AUTH_CONFIG_KEYS if key not in config]
-        if missing_auth_keys:
-            raise Exception(
-                "Config is missing required keys: {}".format(missing_auth_keys))
-        return
-
+    token_broker = config['token_broker']
     if not isinstance(token_broker, dict):
         raise Exception("token_broker must be an object")
 
@@ -606,12 +592,8 @@ def main_impl():
     sf = None
     try:
         sf = Salesforce(
-            refresh_token=CONFIG.get('refresh_token'),
-            sf_client_id=CONFIG.get('client_id'),
-            sf_client_secret=CONFIG.get('client_secret'),
             quota_percent_total=CONFIG.get('quota_percent_total'),
             quota_percent_per_run=CONFIG.get('quota_percent_per_run'),
-            is_sandbox=CONFIG.get('is_sandbox'),
             select_fields_by_default=CONFIG.get('select_fields_by_default'),
             default_start_date=CONFIG.get('start_date'),
             api_type=CONFIG.get('api_type'),
@@ -694,9 +676,6 @@ def main_impl():
                 LOGGER.debug(
                     "Replication used %s Bulk API jobs towards the Salesforce quota.",
                     sf.jobs_completed)
-            if sf.login_timer:
-                with sf._login_lock:
-                    sf.login_timer.cancel()
 
 
 def main():

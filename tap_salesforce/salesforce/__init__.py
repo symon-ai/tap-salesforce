@@ -1,5 +1,5 @@
 import re
-import threading
+import time
 from datetime import datetime, timezone
 import backoff
 import requests
@@ -19,9 +19,6 @@ from tap_salesforce.salesforce.exceptions import (
     TapSalesforceException)
 
 LOGGER = singer.get_logger()
-
-# The minimum expiration setting for SF Refresh Tokens is 15 minutes
-REFRESH_TOKEN_EXPIRATION_PERIOD = 900
 
 BULK_API_TYPE = "BULK"
 REST_API_TYPE = "REST"
@@ -221,13 +218,9 @@ def field_to_property_schema(field, mdata, source_type, is_report=False):  # pyl
 class Salesforce():
     # pylint: disable=too-many-instance-attributes,too-many-arguments
     def __init__(self,
-                 refresh_token=None,
                  token=None,
-                 sf_client_id=None,
-                 sf_client_secret=None,
                  quota_percent_per_run=None,
                  quota_percent_total=None,
-                 is_sandbox=None,
                  select_fields_by_default=None,
                  default_start_date=None,
                  api_type=None,
@@ -237,18 +230,14 @@ class Salesforce():
                  filters=None,
                  token_broker=None):
         self.api_type = api_type.upper() if api_type else None
-        self.refresh_token = refresh_token
         self.token = token
-        self.sf_client_id = sf_client_id
-        self.sf_client_secret = sf_client_secret
         self.token_broker = token_broker or {}
-        self._broker_mode = bool(self.token_broker.get('endpoint'))
         self.session = requests.Session()
-        self._token_lock = threading.RLock()
-        self._login_lock = threading.RLock()
-        self._access_token = None
-        self._instance_url = None
-        self._token_version = None
+        self.access_token = None
+        self.instance_url = None
+        self.token_version = None
+        self.refresh_check_after_seconds = None
+        self._last_broker_check_at = None
         if isinstance(quota_percent_per_run, str) and quota_percent_per_run.strip() == '':
             quota_percent_per_run = None
         if isinstance(quota_percent_total, str) and quota_percent_total.strip() == '':
@@ -257,14 +246,11 @@ class Salesforce():
             quota_percent_per_run) if quota_percent_per_run is not None else 25
         self.quota_percent_total = float(
             quota_percent_total) if quota_percent_total is not None else 80
-        self.is_sandbox = is_sandbox is True or (isinstance(
-            is_sandbox, str) and is_sandbox.lower() == 'true')
         self.select_fields_by_default = select_fields_by_default is True or (isinstance(
             select_fields_by_default, str) and select_fields_by_default.lower() == 'true')
         self.default_start_date = default_start_date
         self.rest_requests_attempted = 0
         self.jobs_completed = 0
-        self.login_timer = None
         self.data_url = "{}/services/data/v52.0/{}"
         self.pk_chunking = False
 
@@ -292,46 +278,14 @@ class Salesforce():
             raise Exception(
                 'Report id is required when source type is report')
 
-    @property
-    def access_token(self):
-        with self._token_lock:
-            return self._access_token
-
-    @access_token.setter
-    def access_token(self, value):
-        with self._token_lock:
-            self._access_token = value
-
-    @property
-    def instance_url(self):
-        with self._token_lock:
-            return self._instance_url
-
-    @instance_url.setter
-    def instance_url(self, value):
-        with self._token_lock:
-            self._instance_url = value
-
-    @property
-    def token_version(self):
-        with self._token_lock:
-            return self._token_version
-
-    @token_version.setter
-    def token_version(self, value):
-        with self._token_lock:
-            self._token_version = value
-
     def _set_session_credentials(self, access_token, instance_url, token_version=None):
-        with self._token_lock:
-            self._access_token = access_token
-            self._instance_url = instance_url
-            if token_version is not None:
-                self._token_version = token_version
+        self.access_token = access_token
+        self.instance_url = instance_url
+        if token_version is not None:
+            self.token_version = token_version
 
     def _get_known_token_version(self):
-        with self._token_lock:
-            return self._token_version
+        return self.token_version
 
     def _with_refreshed_auth_header(self, headers):
         refreshed_headers = dict(headers or {})
@@ -339,28 +293,66 @@ class Salesforce():
         refreshed_headers['X-SFDC-Session'] = self.access_token
         return refreshed_headers
 
+    def _validate_broker_token_if_due(self):
+        if (self.refresh_check_after_seconds is None
+                or self._last_broker_check_at is None):
+            return False
+
+        now = time.monotonic()
+        if now - self._last_broker_check_at < self.refresh_check_after_seconds:
+            return False
+
+        try:
+            return self._login_broker(reason='periodic')
+        except Exception as exc:  # pylint: disable=broad-except
+            # A best-effort validation must not fail a read while the current
+            # Salesforce token may still be valid. Reactive recovery remains
+            # responsible for an actual invalid-session response.
+            self._last_broker_check_at = now
+            LOGGER.warning(
+                "Periodic token broker validation failed; continuing with "
+                "the current Salesforce token: %s",
+                exc)
+            return False
+
     @staticmethod
     def _is_invalid_session_error(exc):
         response = getattr(exc, 'response', None)
         if response is None:
             return False
 
+        if getattr(response, 'status_code', None) == 401:
+            return True
+
         try:
             payload = response.json()
         except ValueError:
-            return False
+            response_text = getattr(response, 'text', '') or ''
+            return (
+                'INVALID_SESSION_ID' in response_text
+                or 'InvalidSessionId' in response_text
+            )
+
+        def is_invalid_session_code(value):
+            normalized = str(value).replace('_', '').upper()
+            return normalized == 'INVALIDSESSIONID'
 
         if isinstance(payload, list):
             return any(
-                isinstance(item, dict) and item.get('errorCode') == 'INVALID_SESSION_ID'
+                isinstance(item, dict)
+                and is_invalid_session_code(
+                    item.get('errorCode', item.get('exceptionCode')))
                 for item in payload)
 
         if isinstance(payload, dict):
-            if payload.get('errorCode') == 'INVALID_SESSION_ID':
+            if is_invalid_session_code(
+                    payload.get('errorCode', payload.get('exceptionCode'))):
                 return True
             for value in payload.values():
                 if isinstance(value, list) and any(
-                        isinstance(item, dict) and item.get('errorCode') == 'INVALID_SESSION_ID'
+                        isinstance(item, dict)
+                        and is_invalid_session_code(
+                            item.get('errorCode', item.get('exceptionCode')))
                         for item in value):
                     return True
 
@@ -424,6 +416,12 @@ class Salesforce():
                       log_body=True,
                       invalid_session_retried=False):
         request_timeout = 5 * 60  # 5 minute request timeout
+        if self._validate_broker_token_if_due():
+            refreshed_headers = self._with_refreshed_auth_header(headers)
+            if headers is not None:
+                headers.update(refreshed_headers)
+            headers = refreshed_headers
+
         try:
             if http_method == "GET":
                 LOGGER.info("Making %s request to %s with params: %s",
@@ -457,14 +455,16 @@ class Salesforce():
         try:
             resp.raise_for_status()
         except RequestException as ex:
-            if (self._broker_mode
-                    and not invalid_session_retried
+            if (not invalid_session_retried
                     and self._is_invalid_session_error(ex)):
                 self._login_broker(reason='invalid_session')
+                refreshed_headers = self._with_refreshed_auth_header(headers)
+                if headers is not None:
+                    headers.update(refreshed_headers)
                 return self._make_request(
                     http_method,
                     url,
-                    headers=self._with_refreshed_auth_header(headers),
+                    headers=refreshed_headers,
                     body=body,
                     stream=stream,
                     params=params,
@@ -476,89 +476,38 @@ class Salesforce():
             self.check_rest_quota_usage(resp.headers)
         return resp
 
-    def _schedule_login_timer(self, period_seconds=None):
-        period = period_seconds or REFRESH_TOKEN_EXPIRATION_PERIOD
-        with self._login_lock:
-            if self.login_timer is not None:
-                self.login_timer.cancel()
-            LOGGER.info("Starting new login timer")
-            self.login_timer = threading.Timer(period, self._on_login_timer)
-            self.login_timer.daemon = True
-            self.login_timer.start()
-
-    def _on_login_timer(self):
-        if self._broker_mode:
-            self._login_broker(reason='periodic')
-        else:
-            self._login_legacy()
-
     def login(self):
-        if self._broker_mode:
-            self._login_broker(reason='startup')
-        else:
-            self._login_legacy()
+        self._login_broker(reason='startup')
 
     def _login_broker(self, reason='startup'):
-        with self._login_lock:
-            LOGGER.info("Attempting login via token broker (%s)", reason)
-            login_succeeded = False
-            refresh_period = None
-            try:
-                credentials = fetch_broker_credentials(
-                    endpoint=self.token_broker['endpoint'],
-                    reason=reason,
-                    task_auth_token=self.token_broker['task_auth_token'],
-                    known_token_version=self._get_known_token_version(),
-                    session=self.session)
-                self._set_session_credentials(
-                    credentials['access_token'],
-                    credentials['instance_url'],
-                    credentials['token_version'])
-                LOGGER.info("Token broker login successful")
-                login_succeeded = True
-                refresh_period = credentials.get('refresh_check_after_seconds')
-            except TokenBrokerError as exc:
-                raise Exception(str(exc)) from exc
-            finally:
-                if login_succeeded or reason != 'startup':
-                    self._schedule_login_timer(refresh_period)
-
-    def _login_legacy(self):
-        if self.is_sandbox:
-            login_url = 'https://test.salesforce.com/services/oauth2/token'
-        else:
-            login_url = 'https://login.salesforce.com/services/oauth2/token'
-
-        login_body = {'grant_type': 'refresh_token', 'client_id': self.sf_client_id,
-                      'client_secret': self.sf_client_secret, 'refresh_token': self.refresh_token}
-
-        LOGGER.info("Attempting login via OAuth2")
-
-        resp = None
+        LOGGER.info("Attempting login via token broker (%s)", reason)
         try:
-            resp = self._make_request(
-                "POST",
-                login_url,
-                body=login_body,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                log_body=False)
-
-            LOGGER.info("OAuth2 login successful")
-
-            auth = resp.json()
-
-            self._set_session_credentials(auth['access_token'], auth['instance_url'])
-        except Exception as e:
-            error_message = str(e)
-            if resp is None and hasattr(e, 'response') and e.response is not None:  # pylint:disable=no-member
-                resp = e.response  # pylint:disable=no-member
-            # NB: requests.models.Response is always falsy here. It is false if status code >= 400
-            if isinstance(resp, requests.models.Response):
-                error_message = error_message + \
-                    ", Response from Salesforce: {}".format(resp.text)
-            raise Exception(error_message) from e
-        finally:
-            self._schedule_login_timer()
+            previous_credentials = (
+                self.access_token,
+                self.instance_url,
+                self.token_version,
+            )
+            credentials = fetch_broker_credentials(
+                endpoint=self.token_broker['endpoint'],
+                reason=reason,
+                task_auth_token=self.token_broker['task_auth_token'],
+                known_token_version=self._get_known_token_version(),
+                session=self.session)
+            self._set_session_credentials(
+                credentials['access_token'],
+                credentials['instance_url'],
+                credentials['token_version'])
+            self.refresh_check_after_seconds = credentials.get(
+                'refresh_check_after_seconds')
+            self._last_broker_check_at = time.monotonic()
+            LOGGER.info("Token broker login successful")
+            return previous_credentials != (
+                self.access_token,
+                self.instance_url,
+                self.token_version,
+            )
+        except TokenBrokerError as exc:
+            raise Exception(str(exc)) from exc
 
     def describe(self):
         """Describes a specific object or a specific report"""
