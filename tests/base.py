@@ -897,13 +897,15 @@ class SalesforceBaseTest(unittest.TestCase):
 
     def setUp(self):
         """Verify that you have set the prerequisites to run the tap (creds, etc.)"""
-        missing_envs = [x for x in ['TAP_SALESFORCE_CLIENT_ID',
-                                    'TAP_SALESFORCE_CLIENT_SECRET',
-                                    'TAP_SALESFORCE_REFRESH_TOKEN']
+        missing_envs = [x for x in ['TAP_SALESFORCE_TOKEN_BROKER_ENDPOINT',
+                                    'TAP_SALESFORCE_TOKEN_BROKER_CONNECTION_ID',
+                                    'TAP_SALESFORCE_TOKEN_BROKER_TASK_AUTH_TOKEN']
                         if os.getenv(x) is None]
 
         if missing_envs:
-            raise Exception("set environment variables")
+            raise Exception(
+                "Missing environment variables: {}".format(
+                    ", ".join(missing_envs)))
 
     #########################
     #   Helper Methods      #
