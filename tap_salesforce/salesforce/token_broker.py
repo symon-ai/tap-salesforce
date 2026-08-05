@@ -1,8 +1,11 @@
 import json
+import logging
 import time
 
 import requests
 from requests.exceptions import RequestException
+
+LOGGER = logging.getLogger(__name__)
 
 BROKER_REQUEST_TIMEOUT_SECONDS = 60
 BROKER_MAX_ATTEMPTS = 3
@@ -88,6 +91,12 @@ def fetch_broker_credentials(endpoint,
 
     http = session or requests
     for attempt in range(BROKER_MAX_ATTEMPTS):
+        attempt_number = attempt + 1
+        LOGGER.info(
+            "Token broker request attempt %s/%s (%s)",
+            attempt_number,
+            BROKER_MAX_ATTEMPTS,
+            reason)
         resp = None
         try:
             resp = http.post(
@@ -102,19 +111,59 @@ def fetch_broker_credentials(endpoint,
                 error_response = resp
 
             can_retry = (
-                attempt + 1 < BROKER_MAX_ATTEMPTS
+                attempt_number < BROKER_MAX_ATTEMPTS
                 and _is_retryable_broker_failure(error_response)
             )
+            failure = (
+                "HTTP {}".format(error_response.status_code)
+                if error_response is not None
+                else type(exc).__name__
+            )
             if not can_retry:
+                terminal_reason = (
+                    "no retries remain"
+                    if attempt_number >= BROKER_MAX_ATTEMPTS
+                    else "not retryable"
+                )
+                LOGGER.error(
+                    "Token broker request attempt %s/%s failed (%s); %s",
+                    attempt_number,
+                    BROKER_MAX_ATTEMPTS,
+                    failure,
+                    terminal_reason)
                 raise TokenBrokerError("Token broker request failed") from exc
 
-            time.sleep(_get_retry_delay_seconds(error_response, attempt))
+            retry_delay = _get_retry_delay_seconds(error_response, attempt)
+            LOGGER.warning(
+                "Token broker request attempt %s/%s failed (%s); "
+                "retrying in %s seconds",
+                attempt_number,
+                BROKER_MAX_ATTEMPTS,
+                failure,
+                retry_delay)
+            time.sleep(retry_delay)
             continue
 
         try:
-            return parse_broker_response(resp.json())
+            credentials = parse_broker_response(resp.json())
         except (ValueError, TypeError) as exc:
+            LOGGER.error(
+                "Token broker request attempt %s/%s returned an invalid response",
+                attempt_number,
+                BROKER_MAX_ATTEMPTS)
             raise TokenBrokerError(
                 "Token broker returned invalid JSON") from exc
+        except TokenBrokerError:
+            LOGGER.error(
+                "Token broker request attempt %s/%s returned an invalid response",
+                attempt_number,
+                BROKER_MAX_ATTEMPTS)
+            raise
+
+        LOGGER.info(
+            "Token broker request attempt %s/%s succeeded",
+            attempt_number,
+            BROKER_MAX_ATTEMPTS)
+        return credentials
 
     raise TokenBrokerError("Token broker request failed")

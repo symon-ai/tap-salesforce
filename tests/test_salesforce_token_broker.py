@@ -102,9 +102,10 @@ class TokenBrokerRequestTests(unittest.TestCase):
         self.assertEqual(session.post.call_count, BROKER_MAX_ATTEMPTS)
         self.assertEqual(mock_sleep.call_count, BROKER_MAX_ATTEMPTS - 1)
 
+    @mock.patch('tap_salesforce.salesforce.token_broker.LOGGER')
     @mock.patch('tap_salesforce.salesforce.token_broker.time.sleep')
     def test_fetch_broker_credentials_retries_timeout_then_succeeds(
-            self, mock_sleep):
+            self, mock_sleep, mock_logger):
         response = mock.Mock()
         response.json.return_value = {
             'accessToken': 'sf-access',
@@ -128,6 +129,31 @@ class TokenBrokerRequestTests(unittest.TestCase):
         self.assertEqual(credentials['access_token'], 'sf-access')
         self.assertEqual(session.post.call_count, 2)
         mock_sleep.assert_called_once_with(1)
+        self.assertEqual(
+            mock_logger.info.call_args_list,
+            [
+                mock.call(
+                    "Token broker request attempt %s/%s (%s)",
+                    1,
+                    BROKER_MAX_ATTEMPTS,
+                    'startup'),
+                mock.call(
+                    "Token broker request attempt %s/%s (%s)",
+                    2,
+                    BROKER_MAX_ATTEMPTS,
+                    'startup'),
+                mock.call(
+                    "Token broker request attempt %s/%s succeeded",
+                    2,
+                    BROKER_MAX_ATTEMPTS),
+            ])
+        mock_logger.warning.assert_called_once_with(
+            "Token broker request attempt %s/%s failed (%s); "
+            "retrying in %s seconds",
+            1,
+            BROKER_MAX_ATTEMPTS,
+            'Timeout',
+            1)
 
     @mock.patch('tap_salesforce.salesforce.token_broker.time.sleep')
     def test_fetch_broker_credentials_retries_lock_conflict_with_retry_after(
@@ -159,9 +185,10 @@ class TokenBrokerRequestTests(unittest.TestCase):
         self.assertEqual(session.post.call_count, 2)
         mock_sleep.assert_called_once_with(2)
 
+    @mock.patch('tap_salesforce.salesforce.token_broker.LOGGER')
     @mock.patch('tap_salesforce.salesforce.token_broker.time.sleep')
     def test_fetch_broker_credentials_does_not_retry_auth_failure(
-            self, mock_sleep):
+            self, mock_sleep, mock_logger):
         unauthorized_response = mock.Mock()
         unauthorized_response.status_code = 401
         unauthorized_response.headers = {}
@@ -180,6 +207,13 @@ class TokenBrokerRequestTests(unittest.TestCase):
 
         session.post.assert_called_once()
         mock_sleep.assert_not_called()
+        mock_logger.error.assert_called_once_with(
+            "Token broker request attempt %s/%s failed (%s); %s",
+            1,
+            BROKER_MAX_ATTEMPTS,
+            'HTTP 401',
+            'not retryable')
+        self.assertNotIn('task-token', str(mock_logger.mock_calls))
 
 
 class SalesforceBrokerModeTests(unittest.TestCase):
