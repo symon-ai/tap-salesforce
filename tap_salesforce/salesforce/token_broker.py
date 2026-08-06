@@ -44,15 +44,10 @@ def parse_broker_response(response_json):
         raise TokenBrokerError(
             "Token broker response missing required fields: {}".format(missing))
 
-    refresh_check_after_seconds = response_json.get('refreshCheckAfterSeconds')
-    if refresh_check_after_seconds is not None:
-        refresh_check_after_seconds = int(refresh_check_after_seconds)
-
     return {
         'access_token': response_json['accessToken'],
         'instance_url': response_json['instanceUrl'],
         'token_version': response_json['tokenVersion'],
-        'refresh_check_after_seconds': refresh_check_after_seconds,
     }
 
 

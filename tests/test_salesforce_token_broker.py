@@ -6,7 +6,10 @@ import requests
 from requests.exceptions import HTTPError
 
 from tap_salesforce import validate_config
-from tap_salesforce.salesforce import Salesforce
+from tap_salesforce.salesforce import (
+    BROKER_REFRESH_CHECK_AFTER_SECONDS,
+    Salesforce,
+)
 from tap_salesforce.salesforce.rest import Rest
 from tap_salesforce.salesforce.token_broker import (
     BROKER_MAX_ATTEMPTS,
@@ -55,7 +58,6 @@ class TokenBrokerRequestTests(unittest.TestCase):
             'accessToken': 'sf-access',
             'instanceUrl': 'https://example.my.salesforce.com',
             'tokenVersion': 'v2',
-            'refreshCheckAfterSeconds': 1200,
         }
         response.raise_for_status = mock.Mock()
 
@@ -82,7 +84,6 @@ class TokenBrokerRequestTests(unittest.TestCase):
         self.assertEqual(credentials['instance_url'],
                          'https://example.my.salesforce.com')
         self.assertEqual(credentials['token_version'], 'v2')
-        self.assertEqual(credentials['refresh_check_after_seconds'], 1200)
         self.assertEqual(kwargs['timeout'], BROKER_REQUEST_TIMEOUT_SECONDS)
 
     @mock.patch('tap_salesforce.salesforce.token_broker.time.sleep')
@@ -226,7 +227,6 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             'access_token': 'broker-access',
             'instance_url': 'https://broker-instance.salesforce.com',
             'token_version': 'v1',
-            'refresh_check_after_seconds': 600,
         }
 
         sf = self._broker_salesforce()
@@ -242,7 +242,9 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         self.assertEqual(sf.instance_url,
                          'https://broker-instance.salesforce.com')
         self.assertEqual(sf.token_version, 'v1')
-        self.assertEqual(sf.refresh_check_after_seconds, 600)
+        self.assertEqual(
+            sf.refresh_check_after_seconds,
+            BROKER_REFRESH_CHECK_AFTER_SECONDS)
         self.assertIsNotNone(sf._last_broker_check_at)
 
     @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
@@ -285,9 +287,8 @@ class SalesforceBrokerModeTests(unittest.TestCase):
 
         mock_fetch.return_value = {
             'access_token': 'new-access',
-            'instance_url': 'https://instance.salesforce.com',
+            'instance_url': 'https://new-instance.salesforce.com',
             'token_version': 'v-new',
-            'refresh_check_after_seconds': 900,
         }
         success_response = mock.Mock()
         success_response.headers = {}
@@ -316,6 +317,9 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         self.assertEqual(
             mock_get.call_args.kwargs['headers']['Authorization'],
             'Bearer new-access')
+        self.assertEqual(
+            mock_get.call_args.args[0],
+            'https://new-instance.salesforce.com/services/data/v52.0/queryAll')
 
     @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
     def test_periodic_validation_failure_continues_with_current_token(
@@ -335,7 +339,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         headers = {'Authorization': 'Bearer current-access'}
         with mock.patch(
                 'tap_salesforce.salesforce.time.monotonic',
-                return_value=1000):
+                side_effect=[1000, 1015]):
             with mock.patch.object(
                     sf.session,
                     'get',
@@ -348,7 +352,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         self.assertEqual(
             mock_get.call_args.kwargs['headers']['Authorization'],
             'Bearer current-access')
-        self.assertEqual(sf._last_broker_check_at, 1000)
+        self.assertEqual(sf._last_broker_check_at, 1015)
 
     @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
     def test_invalid_session_retries_get_once(self, mock_fetch):
@@ -369,9 +373,8 @@ class SalesforceBrokerModeTests(unittest.TestCase):
 
         mock_fetch.return_value = {
             'access_token': 'new-access',
-            'instance_url': 'https://instance.salesforce.com',
+            'instance_url': 'https://new-instance.salesforce.com',
             'token_version': 'v-new',
-            'refresh_check_after_seconds': 900,
         }
 
         with mock.patch.object(sf.session, 'get', side_effect=[invalid_response, success_response]) as mock_get:
@@ -385,6 +388,9 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         retry_headers = mock_get.call_args_list[1].kwargs['headers']
         self.assertEqual(retry_headers['Authorization'], 'Bearer new-access')
         self.assertEqual(retry_headers['X-SFDC-Session'], 'new-access')
+        self.assertEqual(
+            mock_get.call_args_list[1].args[0],
+            'https://new-instance.salesforce.com/services/data/v52.0/queryAll')
         mock_fetch.assert_called_once_with(
             endpoint='https://broker.example/token',
             reason='invalid_session',
@@ -426,7 +432,6 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             'access_token': 'new-access',
             'instance_url': 'https://instance.salesforce.com',
             'token_version': 'v-new',
-            'refresh_check_after_seconds': 900,
         }
 
         headers = {'Authorization': 'Bearer old-access'}
@@ -468,7 +473,6 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             'access_token': 'new-access',
             'instance_url': 'https://instance.salesforce.com',
             'token_version': 'v-new',
-            'refresh_check_after_seconds': 900,
         }
 
         with mock.patch.object(sf.session, 'post', side_effect=[invalid_response, success_response]) as mock_post:
@@ -549,7 +553,6 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             'access_token': 'new-access',
             'instance_url': 'https://instance.salesforce.com',
             'token_version': 'v-new',
-            'refresh_check_after_seconds': 900,
         }
 
         with mock.patch.object(
@@ -664,10 +667,12 @@ class TokenBrokerResponseTests(unittest.TestCase):
             'accessToken': 'abc',
             'instanceUrl': 'https://example.salesforce.com',
             'tokenVersion': 'v3',
-            'refreshCheckAfterSeconds': '450',
         })
         self.assertEqual(parsed['access_token'], 'abc')
-        self.assertEqual(parsed['refresh_check_after_seconds'], 450)
+        self.assertEqual(
+            parsed['instance_url'],
+            'https://example.salesforce.com')
+        self.assertEqual(parsed['token_version'], 'v3')
 
 
 if __name__ == '__main__':

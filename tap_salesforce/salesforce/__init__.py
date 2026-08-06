@@ -1,6 +1,7 @@
 import re
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
 import backoff
 import requests
 from requests.exceptions import RequestException
@@ -22,6 +23,7 @@ LOGGER = singer.get_logger()
 
 BULK_API_TYPE = "BULK"
 REST_API_TYPE = "REST"
+BROKER_REFRESH_CHECK_AFTER_SECONDS = 900
 
 STRING_TYPES = set([
     'id',
@@ -236,7 +238,7 @@ class Salesforce():
         self.access_token = None
         self.instance_url = None
         self.token_version = None
-        self.refresh_check_after_seconds = None
+        self.refresh_check_after_seconds = BROKER_REFRESH_CHECK_AFTER_SECONDS
         self._last_broker_check_at = None
         if isinstance(quota_percent_per_run, str) and quota_percent_per_run.strip() == '':
             quota_percent_per_run = None
@@ -308,7 +310,7 @@ class Salesforce():
             # A best-effort validation must not fail a read while the current
             # Salesforce token may still be valid. Reactive recovery remains
             # responsible for an actual invalid-session response.
-            self._last_broker_check_at = now
+            self._last_broker_check_at = time.monotonic()
             LOGGER.warning(
                 "Periodic token broker validation failed; continuing with "
                 "the current Salesforce token: %s",
@@ -360,6 +362,17 @@ class Salesforce():
 
     def _get_standard_headers(self):
         return {"Authorization": "Bearer {}".format(self.access_token)}
+
+    def _with_current_instance_url(self, url):
+        request_url = urlsplit(url)
+        instance_url = urlsplit(self.instance_url)
+        return urlunsplit((
+            instance_url.scheme,
+            instance_url.netloc,
+            request_url.path,
+            request_url.query,
+            request_url.fragment,
+        ))
 
     def _get_report_query_headers(self):
         return {"Authorization": "Bearer {}".format(self.access_token),
@@ -421,6 +434,7 @@ class Salesforce():
             if headers is not None:
                 headers.update(refreshed_headers)
             headers = refreshed_headers
+            url = self._with_current_instance_url(url)
 
         try:
             if http_method == "GET":
@@ -463,7 +477,7 @@ class Salesforce():
                     headers.update(refreshed_headers)
                 return self._make_request(
                     http_method,
-                    url,
+                    self._with_current_instance_url(url),
                     headers=refreshed_headers,
                     body=body,
                     stream=stream,
@@ -497,8 +511,6 @@ class Salesforce():
                 credentials['access_token'],
                 credentials['instance_url'],
                 credentials['token_version'])
-            self.refresh_check_after_seconds = credentials.get(
-                'refresh_check_after_seconds')
             self._last_broker_check_at = time.monotonic()
             LOGGER.info("Token broker login successful")
             return previous_credentials != (
