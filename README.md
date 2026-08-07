@@ -53,9 +53,11 @@ Config for reading a report
 
 ```
 {
-  "client_id": "secret_client_id",
-  "client_secret": "secret_client_secret",
-  "refresh_token": "abc123",
+  "token_broker": {
+    "endpoint": "https://api.example.com/connections/oauth/CONNECTION_ID/access-token",
+    "connection_id": "CONNECTION_ID",
+    "task_auth_token": "TASK_AUTH_TOKEN"
+  },
   "start_date": "2017-11-02T00:00:00Z",
   "api_type": "BULK",
   "select_fields_by_default": true,
@@ -68,9 +70,11 @@ Config for reading an object
 
 ```
 {
-  "client_id": "secret_client_id",
-  "client_secret": "secret_client_secret",
-  "refresh_token": "abc123",
+  "token_broker": {
+    "endpoint": "https://api.example.com/connections/oauth/CONNECTION_ID/access-token",
+    "connection_id": "CONNECTION_ID",
+    "task_auth_token": "TASK_AUTH_TOKEN"
+  },
   "start_date": "2017-11-02T00:00:00Z",
   "api_type": "BULK",
   "select_fields_by_default": true,
@@ -79,7 +83,11 @@ Config for reading an object
 }
 ```
 
-The `client_id` and `client_secret` keys are your OAuth Salesforce App secrets. The `refresh_token` is a secret created during the OAuth flow. For more info on the Salesforce OAuth flow, visit the [Salesforce documentation](https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/intro_understanding_web_server_oauth_flow.htm). Additionnaly, if the Salesforce Sandbox is to be used to run the tap, the parameter `"is_sandbox": true` must be passed to the config.
+The `token_broker` object is required. Its endpoint supplies Salesforce access
+tokens authorized by the short-lived TaskAuth token. Salesforce connected-app
+credentials and refresh tokens are not accepted by the tap.
+
+**Local testing:** `token_broker.endpoint` must use the stage's active **blue/green API host** (for example `https://sunil2-api-green.wisepipe.com/connections/oauth/<CONNECTION_ID>/access-token`), not only the stage router URL. You also need a `task_auth_token` (24-hour TaskAuth grant). Generate one with the `generateTaskAuthToken` utils script in the main app repo (`app/utils/typescript`; see that README).
 
 The `start_date` is used by the tap as a bound on SOQL queries when searching for records. This should be an [RFC3339](https://www.ietf.org/rfc/rfc3339.txt) formatted date-time, like "2018-01-08T00:00:00Z". For more details, see the [Singer best practices for dates](https://github.com/singer-io/getting-started/blob/master/BEST_PRACTICES.md#dates).
 

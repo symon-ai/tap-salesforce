@@ -16,20 +16,40 @@ from requests.exceptions import RequestException
 
 LOGGER = singer.get_logger()
 
-REQUIRED_CONFIG_KEYS = ['refresh_token',
-                        'client_id',
-                        'client_secret',
-                        'start_date',
+REQUIRED_CONFIG_KEYS = ['start_date',
                         'api_type',
                         'select_fields_by_default',
-                        'source_type']
+                        'source_type',
+                        'token_broker']
 
 CONFIG = {
-    'refresh_token': None,
-    'client_id': None,
-    'client_secret': None,
     'start_date': None
 }
+
+
+def validate_config(config):
+    missing_keys = [key for key in REQUIRED_CONFIG_KEYS if key not in config]
+    if missing_keys:
+        raise Exception("Config is missing required keys: {}".format(missing_keys))
+
+    token_broker = config['token_broker']
+    if not isinstance(token_broker, dict):
+        raise Exception("token_broker must be an object")
+
+    broker_endpoint = token_broker.get('endpoint')
+    if not isinstance(broker_endpoint, str) or not broker_endpoint.strip():
+        raise Exception(
+            "token_broker.endpoint is required when token_broker is configured")
+
+    connection_id = token_broker.get('connection_id')
+    if not isinstance(connection_id, str) or not connection_id.strip():
+        raise Exception(
+            "token_broker.connection_id is required when token_broker is configured")
+
+    task_auth_token = token_broker.get('task_auth_token')
+    if not isinstance(task_auth_token, str) or not task_auth_token.strip():
+        raise Exception(
+            "token_broker.task_auth_token is required when token_broker is configured")
 
 FORCED_FULL_TABLE = {
     # Does not support ordering by CreatedDate
@@ -567,23 +587,21 @@ def main_impl():
     error_info = None
     args = singer_utils.parse_args(REQUIRED_CONFIG_KEYS)
     CONFIG.update(args.config)
+    validate_config(CONFIG)
 
     sf = None
     try:
         sf = Salesforce(
-            refresh_token=CONFIG['refresh_token'],
-            sf_client_id=CONFIG['client_id'],
-            sf_client_secret=CONFIG['client_secret'],
             quota_percent_total=CONFIG.get('quota_percent_total'),
             quota_percent_per_run=CONFIG.get('quota_percent_per_run'),
-            is_sandbox=CONFIG.get('is_sandbox'),
             select_fields_by_default=CONFIG.get('select_fields_by_default'),
             default_start_date=CONFIG.get('start_date'),
             api_type=CONFIG.get('api_type'),
             source_type=CONFIG.get('source_type'),
             object_name=CONFIG.get('object_name'),
             report_id=CONFIG.get('report_id'),
-            filters=CONFIG.get('filters')
+            filters=CONFIG.get('filters'),
+            token_broker=CONFIG.get('token_broker')
         )
 
         sf.login()
@@ -658,8 +676,6 @@ def main_impl():
                 LOGGER.debug(
                     "Replication used %s Bulk API jobs towards the Salesforce quota.",
                     sf.jobs_completed)
-            if sf.login_timer:
-                sf.login_timer.cancel()
 
 
 def main():
