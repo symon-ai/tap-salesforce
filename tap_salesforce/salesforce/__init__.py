@@ -12,6 +12,9 @@ from singer import metadata, metrics
 from tap_salesforce.salesforce.bulk import Bulk
 from tap_salesforce.salesforce.rest import Rest
 from tap_salesforce.salesforce.report_rest import ReportRest
+from tap_salesforce.salesforce.local_oauth import (
+    LocalOAuthClient,
+    LocalOAuthError)
 from tap_salesforce.salesforce.token_broker import (
     TokenBrokerError,
     fetch_broker_credentials)
@@ -230,11 +233,18 @@ class Salesforce():
                  object_name=None,
                  report_id=None,
                  filters=None,
-                 token_broker=None):
+                 token_broker=None,
+                 auth_mode=None,
+                 local_oauth=None):
         self.api_type = api_type.upper() if api_type else None
         self.token = token
         self.token_broker = token_broker or {}
+        self.auth_mode = auth_mode or 'broker'
         self.session = requests.Session()
+        self.local_oauth_client = (
+            LocalOAuthClient(local_oauth, session=self.session)
+            if self.auth_mode == 'local'
+            else None)
         self.access_token = None
         self.instance_url = None
         self.token_version = None
@@ -305,14 +315,14 @@ class Salesforce():
             return False
 
         try:
-            return self._login_broker(reason='periodic')
+            return self._refresh_auth(reason='periodic')
         except Exception as exc:  # pylint: disable=broad-except
             # A best-effort validation must not fail a read while the current
             # Salesforce token may still be valid. Reactive recovery remains
             # responsible for an actual invalid-session response.
             self._last_broker_check_at = time.monotonic()
             LOGGER.warning(
-                "Periodic token broker validation failed; continuing with "
+                "Periodic authentication refresh failed; continuing with "
                 "the current Salesforce token: %s",
                 exc)
             return False
@@ -471,7 +481,7 @@ class Salesforce():
         except RequestException as ex:
             if (not invalid_session_retried
                     and self._is_invalid_session_error(ex)):
-                self._login_broker(reason='invalid_session')
+                self._refresh_auth(reason='invalid_session')
                 refreshed_headers = self._with_refreshed_auth_header(headers)
                 if headers is not None:
                     headers.update(refreshed_headers)
@@ -491,7 +501,12 @@ class Salesforce():
         return resp
 
     def login(self):
-        self._login_broker(reason='startup')
+        self._refresh_auth(reason='startup')
+
+    def _refresh_auth(self, reason):
+        if self.auth_mode == 'local':
+            return self._login_local(reason)
+        return self._login_broker(reason)
 
     def _login_broker(self, reason='startup'):
         LOGGER.info("Attempting login via token broker (%s)", reason)
@@ -519,6 +534,29 @@ class Salesforce():
                 self.token_version,
             )
         except TokenBrokerError as exc:
+            raise Exception(str(exc)) from exc
+
+    def _login_local(self, reason='startup'):
+        LOGGER.info("Attempting login via local OAuth (%s)", reason)
+        try:
+            previous_credentials = (
+                self.access_token,
+                self.instance_url,
+                self.token_version,
+            )
+            credentials = self.local_oauth_client.fetch_credentials(reason)
+            self._set_session_credentials(
+                credentials['access_token'],
+                credentials['instance_url'],
+                credentials['token_version'])
+            self._last_broker_check_at = time.monotonic()
+            LOGGER.info("Local OAuth login successful")
+            return previous_credentials != (
+                self.access_token,
+                self.instance_url,
+                self.token_version,
+            )
+        except LocalOAuthError as exc:
             raise Exception(str(exc)) from exc
 
     def describe(self):

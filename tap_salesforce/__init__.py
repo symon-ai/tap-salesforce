@@ -12,6 +12,8 @@ from tap_salesforce.salesforce import Salesforce
 from tap_salesforce.salesforce.bulk import Bulk
 from tap_salesforce.salesforce.exceptions import (
     TapSalesforceException, TapSalesforceQuotaExceededException, SymonException)
+from tap_salesforce.salesforce.local_oauth import (
+    LocalOAuthError, validate_local_oauth_config)
 from requests.exceptions import RequestException
 
 LOGGER = singer.get_logger()
@@ -19,8 +21,7 @@ LOGGER = singer.get_logger()
 REQUIRED_CONFIG_KEYS = ['start_date',
                         'api_type',
                         'select_fields_by_default',
-                        'source_type',
-                        'token_broker']
+                        'source_type']
 
 CONFIG = {
     'start_date': None
@@ -31,6 +32,20 @@ def validate_config(config):
     missing_keys = [key for key in REQUIRED_CONFIG_KEYS if key not in config]
     if missing_keys:
         raise Exception("Config is missing required keys: {}".format(missing_keys))
+
+    resolve_auth_mode(config)
+
+
+def resolve_auth_mode(config):
+    if 'token_broker' not in config:
+        if config.get('auth_mode') != 'local':
+            raise Exception(
+                "token_broker is required unless auth_mode is 'local'")
+        try:
+            validate_local_oauth_config(config.get('local_oauth'))
+        except LocalOAuthError as exc:
+            raise Exception(str(exc)) from exc
+        return 'local'
 
     token_broker = config['token_broker']
     if not isinstance(token_broker, dict):
@@ -50,6 +65,7 @@ def validate_config(config):
     if not isinstance(task_auth_token, str) or not task_auth_token.strip():
         raise Exception(
             "token_broker.task_auth_token is required when token_broker is configured")
+    return 'broker'
 
 FORCED_FULL_TABLE = {
     # Does not support ordering by CreatedDate
@@ -601,7 +617,9 @@ def main_impl():
             object_name=CONFIG.get('object_name'),
             report_id=CONFIG.get('report_id'),
             filters=CONFIG.get('filters'),
-            token_broker=CONFIG.get('token_broker')
+            auth_mode=resolve_auth_mode(CONFIG),
+            token_broker=CONFIG.get('token_broker'),
+            local_oauth=CONFIG.get('local_oauth')
         )
 
         sf.login()

@@ -83,11 +83,51 @@ Config for reading an object
 }
 ```
 
-The `token_broker` object is required. Its endpoint supplies Salesforce access
-tokens authorized by the short-lived TaskAuth token. Salesforce connected-app
-credentials and refresh tokens are not accepted by the tap.
+Production imports use `token_broker`. Its endpoint supplies Salesforce access
+tokens authorized by the short-lived TaskAuth token. If `token_broker` is
+present, it always takes precedence over local OAuth configuration.
 
 **Local testing:** `token_broker.endpoint` must use the stage's active **blue/green API host** (for example `https://sunil2-api-green.wisepipe.com/connections/oauth/<CONNECTION_ID>/access-token`), not only the stage router URL. You also need a `task_auth_token` (24-hour TaskAuth grant). Generate one with the `generateTaskAuthToken` utils script in the main app repo (`app/utils/typescript`; see that README).
+
+### Local OAuth mode
+
+For development and testing outside import activity containers, omit
+`token_broker`, set `auth_mode` to `local`, and supply Connected App
+credentials:
+
+```json
+{
+  "auth_mode": "local",
+  "local_oauth": {
+    "client_id": "CONNECTED_APP_CLIENT_ID",
+    "client_secret": "CONNECTED_APP_CLIENT_SECRET",
+    "refresh_token": "CURRENT_REFRESH_TOKEN",
+    "is_sandbox": false,
+    "refresh_token_log_path": ".salesforce-oauth/refresh-tokens.jsonl"
+  },
+  "start_date": "2017-11-02T00:00:00Z",
+  "api_type": "BULK",
+  "select_fields_by_default": true,
+  "source_type": "object",
+  "object_name": "OBJECT_NAME"
+}
+```
+
+`is_sandbox` defaults to `false`; set it to `true` to use
+`test.salesforce.com`. The refresh-token log path is optional and defaults to
+the gitignored path shown above. The log file is owner-readable/writable only.
+When Salesforce Refresh Token Rotation returns a new refresh token, the tap
+uses it for later exchanges and appends a JSON line containing the token and
+an ISO date-time.
+
+Local mode exchanges tokens at the same startup, periodic, and invalid-session
+recovery points used by broker mode. It is for local development only—never
+place local OAuth credentials in an import activity configuration or image.
+
+**Post-test cleanup:** If the starting refresh token came from a real Symon
+connection, copy the latest entry from the refresh-token log back to that
+connection, or re-authorize the connection in the UI. With Refresh Token
+Rotation, continuing to use an older token can break that connection.
 
 The `start_date` is used by the tap as a bound on SOQL queries when searching for records. This should be an [RFC3339](https://www.ietf.org/rfc/rfc3339.txt) formatted date-time, like "2018-01-08T00:00:00Z". For more details, see the [Singer best practices for dates](https://github.com/singer-io/getting-started/blob/master/BEST_PRACTICES.md#dates).
 
