@@ -153,6 +153,8 @@ class LocalOAuthClientTests(unittest.TestCase):
             self.assertNotIn('refresh-token-2', logged)
             self.assertNotIn('refresh-token-3', logged)
             self.assertIn('new_refresh_token_returned=%s', logged)
+            self.assertIn('refresh_token_logged=%s', logged)
+            self.assertIn(str(log_path), logged)
 
 
 class LocalOAuthSalesforceTests(unittest.TestCase):

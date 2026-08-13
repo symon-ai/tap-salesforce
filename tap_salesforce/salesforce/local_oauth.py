@@ -116,11 +116,14 @@ class LocalOAuthClient:
 
         LOGGER.info(
             'Local OAuth exchange completed at %s '
-            '(sandbox=%s, reason=%s, new_refresh_token_returned=%s)',
+            '(sandbox=%s, reason=%s, new_refresh_token_returned=%s, '
+            'refresh_token_logged=%s, refresh_token_log_path=%s)',
             self._format_timestamp(exchanged_at),
             self.is_sandbox,
             reason,
-            has_new_refresh_token)
+            has_new_refresh_token,
+            has_new_refresh_token,
+            self.refresh_token_log_path)
 
         return {
             'access_token': access_token,
