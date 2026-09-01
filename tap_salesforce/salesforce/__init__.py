@@ -13,6 +13,7 @@ from tap_salesforce.salesforce.bulk import Bulk
 from tap_salesforce.salesforce.rest import Rest
 from tap_salesforce.salesforce.report_rest import ReportRest
 from tap_salesforce.salesforce.local_oauth import (
+    DEFAULT_OAUTH_BASE_URL,
     LocalOAuthClient,
     LocalOAuthError)
 from tap_salesforce.salesforce.token_broker import (
@@ -235,16 +236,25 @@ class Salesforce():
                  filters=None,
                  token_broker=None,
                  auth_mode=None,
-                 local_oauth=None):
+                 local_oauth=None,
+                 base_url=None):
         self.api_type = api_type.upper() if api_type else None
         self.token = token
         self.token_broker = token_broker or {}
         self.auth_mode = auth_mode or 'broker'
         self.session = requests.Session()
         self.local_oauth_client = (
-            LocalOAuthClient(local_oauth, session=self.session)
+            LocalOAuthClient(
+                local_oauth,
+                session=self.session,
+                base_url=base_url)
             if self.auth_mode == 'local'
             else None)
+        self.base_url = (
+            self.local_oauth_client.base_url
+            if self.local_oauth_client is not None
+            else (base_url or DEFAULT_OAUTH_BASE_URL).rstrip('/')
+        )
         self.access_token = None
         self.instance_url = None
         self.token_version = None
@@ -290,9 +300,9 @@ class Salesforce():
             raise Exception(
                 'Report id is required when source type is report')
 
-    def _set_session_credentials(self, access_token, instance_url, token_version=None):
+    def _set_session_credentials(self, access_token, instance_url=None, token_version=None):
         self.access_token = access_token
-        self.instance_url = instance_url
+        self.instance_url = (instance_url or self.base_url).rstrip('/')
         if token_version is not None:
             self.token_version = token_version
 
