@@ -92,13 +92,14 @@ class LocalOAuthClientTests(unittest.TestCase):
             log_path = Path(directory) / 'tokens.jsonl'
             client = LocalOAuthClient(
                 _local_oauth(log_path, is_sandbox=True),
-                session=session)
+                session=session,
+                instance_url='https://sandbox.example/')
 
             credentials = client.fetch_credentials('startup')
 
             self.assertEqual(credentials['access_token'], 'access-token')
             session.post.assert_called_once_with(
-                'https://test.salesforce.com/services/oauth2/token',
+                'https://sandbox.example/services/oauth2/token',
                 data={
                     'grant_type': 'refresh_token',
                     'client_id': 'client-id',
@@ -108,30 +109,14 @@ class LocalOAuthClientTests(unittest.TestCase):
                 timeout=LOCAL_OAUTH_REQUEST_TIMEOUT_SECONDS)
             self.assertEqual(log_path.read_text(encoding='utf-8'), '')
 
-    def test_uses_default_vendor_base_url_when_response_omits_service_url(self):
+    def test_requires_configured_instance_url(self):
         with tempfile.TemporaryDirectory() as directory:
-            response = mock.Mock()
-            response.json.return_value = {
-                'access_token': 'access-token',
-                'issued_at': '12345',
-            }
-            response.raise_for_status.return_value = None
-            session = mock.Mock()
-            session.post.return_value = response
-            client = LocalOAuthClient(
-                _local_oauth(Path(directory) / 'tokens.jsonl'),
-                session=session)
+            with self.assertRaisesRegex(
+                    LocalOAuthError, 'instance_url is required'):
+                LocalOAuthClient(
+                    _local_oauth(Path(directory) / 'tokens.jsonl'))
 
-            credentials = client.fetch_credentials('startup')
-
-            self.assertEqual(
-                session.post.call_args.args[0],
-                'https://login.salesforce.com/services/oauth2/token')
-            self.assertEqual(
-                credentials['instance_url'],
-                'https://login.salesforce.com')
-
-    def test_uses_customer_base_url_for_exchange_and_api_fallback(self):
+    def test_uses_configured_instance_url_for_exchange_and_api_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
             response = mock.Mock()
             response.json.return_value = {
@@ -144,7 +129,7 @@ class LocalOAuthClientTests(unittest.TestCase):
             client = LocalOAuthClient(
                 _local_oauth(Path(directory) / 'tokens.jsonl'),
                 session=session,
-                base_url='https://customer.example/')
+                instance_url='https://customer.example/')
 
             credentials = client.fetch_credentials('startup')
 
@@ -170,7 +155,7 @@ class LocalOAuthClientTests(unittest.TestCase):
             client = LocalOAuthClient(
                 _local_oauth(Path(directory) / 'tokens.jsonl'),
                 session=session,
-                base_url='https://customer.example')
+                instance_url='https://customer.example')
 
             credentials = client.fetch_credentials('startup')
 
@@ -201,7 +186,10 @@ class LocalOAuthClientTests(unittest.TestCase):
             session = mock.Mock()
             session.post.side_effect = [first_response, second_response]
             log_path = Path(directory) / 'tokens.jsonl'
-            client = LocalOAuthClient(_local_oauth(log_path), session=session)
+            client = LocalOAuthClient(
+                _local_oauth(log_path),
+                session=session,
+                instance_url='https://customer.example')
 
             client.fetch_credentials('startup')
             client.fetch_credentials('periodic')
@@ -237,7 +225,8 @@ class LocalOAuthSalesforceTests(unittest.TestCase):
                 object_name='Account',
                 auth_mode='local',
                 local_oauth=_local_oauth(
-                    Path(directory) / 'tokens.jsonl'))
+                    Path(directory) / 'tokens.jsonl'),
+                instance_url='https://customer.example')
 
             salesforce.login()
             salesforce._refresh_auth('periodic')
@@ -277,7 +266,7 @@ class LocalOAuthSalesforceTests(unittest.TestCase):
                         auth_mode='local',
                         local_oauth=_local_oauth(
                             Path(directory) / 'tokens.jsonl'),
-                        base_url='https://customer.example/')
+                        instance_url='https://customer.example/')
                     salesforce.session.post = mock.Mock(
                         return_value=oauth_response)
                     salesforce.session.get = mock.Mock(

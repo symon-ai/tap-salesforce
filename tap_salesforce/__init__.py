@@ -620,7 +620,7 @@ def main_impl():
             auth_mode=resolve_auth_mode(CONFIG),
             token_broker=CONFIG.get('token_broker'),
             local_oauth=CONFIG.get('local_oauth'),
-            base_url=CONFIG.get('base_url')
+            instance_url=CONFIG.get('instance_url')
         )
 
         sf.login()

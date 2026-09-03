@@ -13,7 +13,6 @@ from tap_salesforce.salesforce.bulk import Bulk
 from tap_salesforce.salesforce.rest import Rest
 from tap_salesforce.salesforce.report_rest import ReportRest
 from tap_salesforce.salesforce.local_oauth import (
-    DEFAULT_OAUTH_BASE_URL,
     LocalOAuthClient,
     LocalOAuthError)
 from tap_salesforce.salesforce.token_broker import (
@@ -237,7 +236,7 @@ class Salesforce():
                  token_broker=None,
                  auth_mode=None,
                  local_oauth=None,
-                 base_url=None):
+                 instance_url=None):
         self.api_type = api_type.upper() if api_type else None
         self.token = token
         self.token_broker = token_broker or {}
@@ -247,16 +246,15 @@ class Salesforce():
             LocalOAuthClient(
                 local_oauth,
                 session=self.session,
-                base_url=base_url)
+                instance_url=instance_url)
             if self.auth_mode == 'local'
             else None)
-        self.base_url = (
-            self.local_oauth_client.base_url
-            if self.local_oauth_client is not None
-            else (base_url or DEFAULT_OAUTH_BASE_URL).rstrip('/')
-        )
+        # The URL supplied by the main app is taken as accurate. A URL returned
+        # by token exchange replaces it for subsequent API requests.
+        self.configured_instance_url = (
+            instance_url.rstrip('/') if instance_url else None)
         self.access_token = None
-        self.instance_url = None
+        self.instance_url = self.configured_instance_url
         self.token_version = None
         self.refresh_check_after_seconds = BROKER_REFRESH_CHECK_AFTER_SECONDS
         self._last_broker_check_at = None
@@ -302,7 +300,11 @@ class Salesforce():
 
     def _set_session_credentials(self, access_token, instance_url=None, token_version=None):
         self.access_token = access_token
-        self.instance_url = (instance_url or self.base_url).rstrip('/')
+        resolved_instance_url = instance_url or self.configured_instance_url
+        self.instance_url = (
+            resolved_instance_url.rstrip('/')
+            if resolved_instance_url
+            else None)
         if token_version is not None:
             self.token_version = token_version
 

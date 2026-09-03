@@ -248,7 +248,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         self.assertIsNotNone(sf._last_broker_check_at)
 
     @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
-    def test_startup_login_uses_configured_base_url_when_broker_omits_url(
+    def test_startup_login_uses_configured_instance_url_when_broker_omits_url(
             self, mock_fetch):
         mock_fetch.return_value = {
             'access_token': 'broker-access',
@@ -257,10 +257,29 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         }
 
         sf = Salesforce(**_base_salesforce_kwargs(
-            base_url='https://customer.example/'))
+            instance_url='https://customer.example/'))
         sf.login()
 
         self.assertEqual(sf.instance_url, 'https://customer.example')
+
+    @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
+    def test_token_exchange_url_overrides_configured_url(self, mock_fetch):
+        mock_fetch.return_value = {
+            'access_token': 'broker-access',
+            'instance_url': 'https://broker-instance.salesforce.com/',
+            'token_version': 'v1',
+        }
+
+        sf = Salesforce(**_base_salesforce_kwargs(
+            instance_url='https://customer.example/'))
+
+        self.assertEqual(sf.instance_url, 'https://customer.example')
+
+        sf.login()
+
+        self.assertEqual(
+            sf.instance_url,
+            'https://broker-instance.salesforce.com')
 
 
     @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
