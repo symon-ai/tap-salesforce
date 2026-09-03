@@ -235,18 +235,26 @@ class Salesforce():
                  filters=None,
                  token_broker=None,
                  auth_mode=None,
-                 local_oauth=None):
+                 local_oauth=None,
+                 instance_url=None):
         self.api_type = api_type.upper() if api_type else None
         self.token = token
         self.token_broker = token_broker or {}
         self.auth_mode = auth_mode or 'broker'
         self.session = requests.Session()
         self.local_oauth_client = (
-            LocalOAuthClient(local_oauth, session=self.session)
+            LocalOAuthClient(
+                local_oauth,
+                session=self.session,
+                instance_url=instance_url)
             if self.auth_mode == 'local'
             else None)
+        # The URL supplied by the main app is taken as accurate. A URL returned
+        # by token exchange replaces it for subsequent API requests.
+        self.configured_instance_url = (
+            instance_url.rstrip('/') if instance_url else None)
         self.access_token = None
-        self.instance_url = None
+        self.instance_url = self.configured_instance_url
         self.token_version = None
         self.refresh_check_after_seconds = BROKER_REFRESH_CHECK_AFTER_SECONDS
         self._last_broker_check_at = None
@@ -290,9 +298,13 @@ class Salesforce():
             raise Exception(
                 'Report id is required when source type is report')
 
-    def _set_session_credentials(self, access_token, instance_url, token_version=None):
+    def _set_session_credentials(self, access_token, instance_url=None, token_version=None):
         self.access_token = access_token
-        self.instance_url = instance_url
+        resolved_instance_url = instance_url or self.configured_instance_url
+        self.instance_url = (
+            resolved_instance_url.rstrip('/')
+            if resolved_instance_url
+            else None)
         if token_version is not None:
             self.token_version = token_version
 

@@ -619,7 +619,8 @@ def main_impl():
             filters=CONFIG.get('filters'),
             auth_mode=resolve_auth_mode(CONFIG),
             token_broker=CONFIG.get('token_broker'),
-            local_oauth=CONFIG.get('local_oauth')
+            local_oauth=CONFIG.get('local_oauth'),
+            instance_url=CONFIG.get('instance_url')
         )
 
         sf.login()
