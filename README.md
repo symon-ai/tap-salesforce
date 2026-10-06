@@ -58,6 +58,7 @@ Config for reading a report
     "connection_id": "CONNECTION_ID",
     "task_auth_token": "TASK_AUTH_TOKEN"
   },
+  "instance_url": "https://customer.example",
   "start_date": "2017-11-02T00:00:00Z",
   "api_type": "BULK",
   "select_fields_by_default": true,
@@ -75,6 +76,7 @@ Config for reading an object
     "connection_id": "CONNECTION_ID",
     "task_auth_token": "TASK_AUTH_TOKEN"
   },
+  "instance_url": "https://customer.example",
   "start_date": "2017-11-02T00:00:00Z",
   "api_type": "BULK",
   "select_fields_by_default": true,
@@ -86,6 +88,11 @@ Config for reading an object
 Production imports use `token_broker`. Its endpoint supplies Salesforce access
 tokens authorized by the short-lived TaskAuth token. If `token_broker` is
 present, it always takes precedence over local OAuth configuration.
+
+`instance_url` is the Salesforce host supplied by the main app. The tap takes it as
+accurate and uses it as-is for OAuth token exchange and Salesforce API
+requests. When token exchange returns an `instance_url` or `service_url`, that
+returned URL is used instead for subsequent Salesforce API requests.
 
 ## Running locally
 
@@ -149,6 +156,7 @@ The stored Salesforce access token and instance URL are not required in
 ```json
 {
   "auth_mode": "local",
+  "instance_url": "https://customer.example",
   "local_oauth": {
     "client_id": "CONNECTED_APP_CLIENT_ID",
     "client_secret": "CONNECTED_APP_CLIENT_SECRET",
@@ -211,10 +219,11 @@ Write decrypted values directly to an owner-only config outside source
 control; never send plaintext credentials to stdout, logs, shell arguments, or
 command history.
 
-`is_sandbox` defaults to `false`; set it to `true` to use
-`test.salesforce.com`. The refresh-token log path is optional and defaults to
-the gitignored path shown above. Setting it to an empty string is invalid. The
-log file is owner-readable/writable only.
+`is_sandbox` defaults to `false` and is recorded in local OAuth logs. The tap
+uses the configured `instance_url`; it does not substitute `login.salesforce.com`
+or `test.salesforce.com`. The refresh-token log path is optional and defaults
+to the gitignored path shown above. Setting it to an empty string is invalid.
+The log file is owner-readable/writable only.
 
 When running direct local OAuth:
 

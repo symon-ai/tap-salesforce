@@ -38,7 +38,7 @@ def build_broker_request(endpoint, reason, known_token_version=None):
 
 
 def parse_broker_response(response_json):
-    required_fields = ('accessToken', 'instanceUrl', 'tokenVersion')
+    required_fields = ('accessToken', 'tokenVersion')
     missing = [field for field in required_fields if field not in response_json]
     if missing:
         raise TokenBrokerError(
@@ -46,7 +46,10 @@ def parse_broker_response(response_json):
 
     return {
         'access_token': response_json['accessToken'],
-        'instance_url': response_json['instanceUrl'],
+        'instance_url': (
+            response_json.get('instanceUrl')
+            or response_json.get('serviceUrl')
+        ),
         'token_version': response_json['tokenVersion'],
     }
 

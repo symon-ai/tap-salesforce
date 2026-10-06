@@ -248,6 +248,41 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         self.assertIsNotNone(sf._last_broker_check_at)
 
     @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
+    def test_startup_login_uses_configured_instance_url_when_broker_omits_url(
+            self, mock_fetch):
+        mock_fetch.return_value = {
+            'access_token': 'broker-access',
+            'instance_url': None,
+            'token_version': 'v1',
+        }
+
+        sf = Salesforce(**_base_salesforce_kwargs(
+            instance_url='https://customer.example/'))
+        sf.login()
+
+        self.assertEqual(sf.instance_url, 'https://customer.example')
+
+    @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
+    def test_token_exchange_url_overrides_configured_url(self, mock_fetch):
+        mock_fetch.return_value = {
+            'access_token': 'broker-access',
+            'instance_url': 'https://broker-instance.salesforce.com/',
+            'token_version': 'v1',
+        }
+
+        sf = Salesforce(**_base_salesforce_kwargs(
+            instance_url='https://customer.example/'))
+
+        self.assertEqual(sf.instance_url, 'https://customer.example')
+
+        sf.login()
+
+        self.assertEqual(
+            sf.instance_url,
+            'https://broker-instance.salesforce.com')
+
+
+    @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
     def test_request_skips_periodic_validation_before_interval(self, mock_fetch):
         sf = self._broker_salesforce()
         sf._set_session_credentials(
@@ -673,6 +708,17 @@ class TokenBrokerResponseTests(unittest.TestCase):
             parsed['instance_url'],
             'https://example.salesforce.com')
         self.assertEqual(parsed['token_version'], 'v3')
+
+    def test_parse_broker_response_accepts_service_url(self):
+        parsed = parse_broker_response({
+            'accessToken': 'abc',
+            'serviceUrl': 'https://service.example',
+            'tokenVersion': 'v3',
+        })
+
+        self.assertEqual(
+            parsed['instance_url'],
+            'https://service.example')
 
 
 if __name__ == '__main__':
