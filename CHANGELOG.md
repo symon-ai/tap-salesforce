@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.0.2
+
+- Support optional top-level `base_url` for local OAuth exchange and API fallback;
+  honor `service_url` when `instance_url` is absent without changing broker authority.
+
 
 ## 2.0.14
 
