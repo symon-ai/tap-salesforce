@@ -87,6 +87,15 @@ Production imports use `token_broker`. Its endpoint supplies Salesforce access
 tokens authorized by the short-lived TaskAuth token. If `token_broker` is
 present, it always takes precedence over local OAuth configuration.
 
+The optional top-level `base_url` config sets the local OAuth exchange base
+(for example, `"base_url": "https://customer.example.com"`). When omitted,
+local OAuth uses `https://login.salesforce.com`, or `https://test.salesforce.com`
+when `local_oauth.is_sandbox` is true. Token responses select API routing from
+nonempty `instance_url`, then `service_url`, then the configured/default base.
+Later refreshes without either URL retain the established API route; refresh
+requests still use the configured OAuth base. Hosted tasks always use the
+broker's canonical URL, regardless of `base_url`.
+
 ## Running locally
 
 ### Recommended: token broker

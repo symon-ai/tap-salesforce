@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.0.2
+
+- Support top-level `base_url` for local OAuth, token-response `service_url`
+  fallback, and API route retention across refreshes without a URL.
+
 
 ## 2.0.14
 
