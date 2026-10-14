@@ -78,6 +78,51 @@ class LocalOAuthConfigTests(unittest.TestCase):
 
 
 class LocalOAuthClientTests(unittest.TestCase):
+    def test_custom_origin_overrides_sandbox_and_retains_legacy_defaults(self):
+        cases = [
+            (None, False, 'https://login.salesforce.com'),
+            ('', True, 'https://test.salesforce.com'),
+            (None, True, 'https://test.salesforce.com'),
+            ('https://customer.example.com/', True, 'https://customer.example.com'),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            for base_url, is_sandbox, expected in cases:
+                with self.subTest(base_url=base_url, is_sandbox=is_sandbox):
+                    client = LocalOAuthClient(
+                        _local_oauth(Path(directory) / 'tokens.jsonl',
+                                     is_sandbox=is_sandbox),
+                        base_url=base_url)
+                    self.assertEqual(
+                        client.token_url, expected + '/services/oauth2/token')
+
+    def test_service_url_fallback_and_instance_url_precedence(self):
+        cases = [
+            ({'service_url': 'https://service.example.com'},
+             'https://service.example.com'),
+            ({'instance_url': '', 'service_url': 'https://service.example.com'},
+             'https://service.example.com'),
+            ({'instance_url': 'https://instance.example.com',
+              'service_url': 'https://service.example.com'},
+             'https://instance.example.com'),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            for urls, expected in cases:
+                with self.subTest(urls=urls):
+                    session = mock.Mock()
+                    session.post.return_value.json.return_value = {
+                        'access_token': 'opaque-not-a-jwt', **urls}
+                    client = LocalOAuthClient(
+                        _local_oauth(Path(directory) / 'tokens.jsonl'),
+                        session=session, base_url='https://customer.example.com/')
+                    credentials = client.fetch_credentials('startup')
+                    self.assertEqual(credentials['instance_url'], expected)
+                    self.assertEqual(credentials['access_token'], 'opaque-not-a-jwt')
+                    self.assertEqual(
+                        session.post.call_args.args[0],
+                        'https://customer.example.com/services/oauth2/token')
+                    self.assertNotIn('verify', session.post.call_args.kwargs)
+                    self.assertNotIn('cert', session.post.call_args.kwargs)
+
     def test_uses_sandbox_endpoint_and_preserves_request_secrets_in_memory_only(self):
         with tempfile.TemporaryDirectory() as directory:
             response = mock.Mock()

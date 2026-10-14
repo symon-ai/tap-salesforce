@@ -164,6 +164,17 @@ The stored Salesforce access token and instance URL are not required in
 }
 ```
 
+Set optional top-level `base_url` (for example,
+`"base_url": "https://customer.example.com"`) to choose the direct local OAuth
+origin. The tap appends `/services/oauth2/token`, ignoring a trailing slash.
+When omitted or empty, `local_oauth.is_sandbox` retains the production
+`https://login.salesforce.com` or sandbox `https://test.salesforce.com` default.
+API requests use the token response's `instance_url`, falling back to
+`service_url`, including after refresh; `base_url` is not the API origin.
+Broker configuration still takes precedence and does not use `base_url` for
+local exchange. Access tokens remain opaque and normal Requests certificate
+verification remains enabled.
+
 #### Where the local credentials come from
 
 For Salesforce connections, the Connected App client secret is not stored in

@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.0.2
+
+- Support optional `base_url` for direct local OAuth and token-returned
+  `service_url` as a fallback for API routing, retaining broker precedence.
+
 
 ## 2.0.14
 
