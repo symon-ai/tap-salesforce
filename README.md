@@ -211,8 +211,15 @@ Write decrypted values directly to an owner-only config outside source
 control; never send plaintext credentials to stdout, logs, shell arguments, or
 command history.
 
-`is_sandbox` defaults to `false`; set it to `true` to use
-`test.salesforce.com`. The refresh-token log path is optional and defaults to
+`local_oauth.base_url` optionally selects the OAuth host, overriding a top-level
+`base_url`. Custom URLs must use HTTPS without userinfo, query or fragment.
+Token requests use that URL without trailing slashes plus
+`/services/oauth2/token`. Without either setting, `is_sandbox` defaults to
+`false` and uses `https://login.salesforce.com`; `true` uses
+`https://test.salesforce.com`. API requests prefer the token response's
+`instance_url`, then `service_url`, then the configured/default base URL,
+including after refresh. Broker mode continues using the broker's `instanceUrl`.
+The refresh-token log path is optional and defaults to
 the gitignored path shown above. Setting it to an empty string is invalid. The
 log file is owner-readable/writable only.
 

@@ -3,6 +3,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -44,12 +45,34 @@ def validate_local_oauth_config(local_oauth):
 class LocalOAuthClient:
     """Exchanges a local refresh token and preserves rotated replacements."""
 
-    def __init__(self, local_oauth, session=None):
+    def __init__(self, local_oauth, session=None, base_url=None):
         validate_local_oauth_config(local_oauth)
         self.client_id = local_oauth['client_id']
         self.client_secret = local_oauth['client_secret']
         self.refresh_token = local_oauth['refresh_token']
         self.is_sandbox = local_oauth.get('is_sandbox', False)
+        default_base_url = (
+            'https://test.salesforce.com' if self.is_sandbox
+            else 'https://login.salesforce.com')
+        selected_base_url = local_oauth.get(
+            'base_url', base_url if base_url is not None else default_base_url)
+        if not isinstance(selected_base_url, str) or not selected_base_url.strip():
+            raise LocalOAuthError('base_url must be a non-empty HTTPS URL')
+        try:
+            parsed_base_url = urlsplit(selected_base_url)
+            valid_base_url = (
+                parsed_base_url.scheme == 'https'
+                and bool(parsed_base_url.hostname)
+                and parsed_base_url.username is None
+                and parsed_base_url.password is None
+                and not parsed_base_url.query
+                and not parsed_base_url.fragment)
+        except ValueError:
+            valid_base_url = False
+        if not valid_base_url:
+            raise LocalOAuthError(
+                'base_url must be an HTTPS URL without userinfo, query or fragment')
+        self.base_url = selected_base_url.rstrip('/')
         self.refresh_token_log_path = Path(local_oauth.get(
             'refresh_token_log_path',
             DEFAULT_REFRESH_TOKEN_LOG_PATH))
@@ -58,8 +81,7 @@ class LocalOAuthClient:
 
     @property
     def token_url(self):
-        domain = 'test.salesforce.com' if self.is_sandbox else 'login.salesforce.com'
-        return 'https://{}/services/oauth2/token'.format(domain)
+        return '{}/services/oauth2/token'.format(self.base_url)
 
     def fetch_credentials(self, reason):
         if reason not in LOCAL_OAUTH_REASONS:
@@ -94,13 +116,14 @@ class LocalOAuthClient:
                 'Local OAuth token endpoint returned invalid JSON') from exc
 
         access_token = payload.get('access_token')
-        instance_url = payload.get('instance_url')
+        instance_url = next(
+            (value.strip() for value in (
+                payload.get('instance_url'), payload.get('service_url'))
+             if isinstance(value, str) and value.strip()),
+            self.base_url)
         if not isinstance(access_token, str) or not access_token.strip():
             raise LocalOAuthError(
                 'Local OAuth response missing access_token')
-        if not isinstance(instance_url, str) or not instance_url.strip():
-            raise LocalOAuthError(
-                'Local OAuth response missing instance_url')
 
         returned_refresh_token = payload.get('refresh_token')
         has_new_refresh_token = (
