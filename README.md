@@ -144,7 +144,8 @@ Before preparing the config:
    omit `token_broker`, and add:
 
 The stored Salesforce access token and instance URL are not required in
-`local_oauth`; the refresh-token exchange returns fresh values.
+`local_oauth`; the refresh-token exchange supplies the access token and can
+return the API endpoint.
 
 ```json
 {
@@ -211,10 +212,19 @@ Write decrypted values directly to an owner-only config outside source
 control; never send plaintext credentials to stdout, logs, shell arguments, or
 command history.
 
-`is_sandbox` defaults to `false`; set it to `true` to use
-`test.salesforce.com`. The refresh-token log path is optional and defaults to
-the gitignored path shown above. Setting it to an empty string is invalid. The
-log file is owner-readable/writable only.
+`is_sandbox` defaults to `false` (`https://login.salesforce.com`); set it to
+`true` to use `https://test.salesforce.com`. Optional `local_oauth.base_url`
+(for example, `"base_url": "https://your-domain.my.salesforce.com"`) overrides
+either default for token exchanges at `/services/oauth2/token`. Trailing
+slashes are removed. API requests prefer the response's `instance_url`, then
+`service_url`, then the last returned endpoint, or the configured/default base
+URL if no endpoint has been returned. Refresh exchanges keep using the
+configured/default base URL. Access tokens remain opaque, and HTTPS uses
+standard TLS certificate verification.
+
+The refresh-token log path is optional and defaults to the gitignored path
+shown above. Setting it or `base_url` to an empty string is invalid. The log
+file is owner-readable/writable only.
 
 When running direct local OAuth:
 
