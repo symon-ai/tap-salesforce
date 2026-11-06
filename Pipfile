@@ -4,20 +4,20 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-backoff = {version = "==2.2.1", markers = "python_full_version >= \"3.13.0\" and python_version < \"4.0\""}
-certifi = {version = "==2026.1.4", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-charset-normalizer = {version = "==3.4.4", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+backoff = {version = "==2.2.1", markers = "python_version >= \"3.13\" and python_version < \"4.0\""}
+certifi = {version = "==2026.10.23", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+charset-normalizer = {version = "==3.4.4", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
 ciso8601 = {version = "==2.3.3", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-idna = {version = "==3.11", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+idna = {version = "==3.11", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
 jsonschema = {version = "==2.6.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-python-dateutil = {version = "==2.9.0.post0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+python-dateutil = {version = "==2.9.0.post0", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
 pytz = {version = "==2025.2", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-requests = {version = "==2.33.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-simplejson = {version = "==3.20.2", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+requests = {version = "==2.33.0", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+simplejson = {version = "==3.20.2", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
 singer-python = {version = "==6.3.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-six = {version = "==1.17.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-urllib3 = {version = "==2.7.0", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
-xmltodict = {version = "==1.0.2", markers = "python_full_version >= \"3.13.0\" and python_full_version < \"4.0.0\""}
+six = {version = "==1.17.0", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+urllib3 = {version = "==2.7.0", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
+xmltodict = {version = "==1.0.2", markers = "python_version >= \"3.13\" and python_full_version < \"4.0.0\""}
 
 [dev-packages]
 
