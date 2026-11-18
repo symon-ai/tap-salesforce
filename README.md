@@ -216,6 +216,15 @@ command history.
 the gitignored path shown above. Setting it to an empty string is invalid. The
 log file is owner-readable/writable only.
 
+Set top-level `base_url` to an HTTPS origin (for example,
+`"https://salesforce.customer.example"`) for a customer-managed OAuth host.
+Without it, the production/sandbox defaults above remain unchanged. Direct
+local OAuth exchanges tokens at this host; API requests use the returned
+`instance_url`, then `service_url`, retaining the previous API URL on refresh
+when neither is returned, or using `base_url` on the first exchange.
+Broker mode uses the host stored on the ELT connection and the API URL
+returned by the broker.
+
 When running direct local OAuth:
 
 1. Run discovery or sync with the protected config.

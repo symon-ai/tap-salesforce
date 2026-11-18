@@ -78,6 +78,57 @@ class LocalOAuthConfigTests(unittest.TestCase):
 
 
 class LocalOAuthClientTests(unittest.TestCase):
+    def test_custom_origin_and_returned_api_routing_across_refresh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = mock.Mock()
+            session.post.return_value.json.side_effect = [
+                {'access_token': 'opaque-token',
+                 'service_url': 'https://api.customer.example/'},
+                {'access_token': 'next-opaque-token'},
+                {'access_token': 'last-opaque-token',
+                 'instance_url': 'https://instance.customer.example',
+                 'service_url': 'https://ignored.customer.example'},
+            ]
+            salesforce = Salesforce(
+                default_start_date='2020-01-01T00:00:00Z',
+                source_type='object', object_name='Account', auth_mode='local',
+                local_oauth=_local_oauth(Path(directory) / 'tokens.jsonl'),
+                base_url='https://oauth.customer.example/')
+            salesforce.local_oauth_client.session = session
+
+            for reason, expected_url in (
+                    ('startup', 'https://api.customer.example'),
+                    ('periodic', 'https://api.customer.example'),
+                    ('invalid_session', 'https://instance.customer.example')):
+                salesforce._refresh_auth(reason)
+                self.assertEqual(salesforce.instance_url, expected_url)
+            self.assertEqual(salesforce.access_token, 'last-opaque-token')
+            self.assertTrue(all(
+                request.args[0] == 'https://oauth.customer.example/services/oauth2/token'
+                for request in session.post.call_args_list))
+
+    def test_configured_origin_is_used_when_no_api_url_is_returned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = mock.Mock()
+            session.post.return_value.json.return_value = {'access_token': 'opaque'}
+            client = LocalOAuthClient(
+                _local_oauth(Path(directory) / 'tokens.jsonl'), session=session,
+                base_url='https://customer.example')
+            self.assertEqual(
+                client.fetch_credentials('startup')['instance_url'],
+                'https://customer.example')
+
+    def test_rejects_non_origin_custom_urls_before_exchange(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for base_url in ('http://customer.example', 'https://host/path',
+                             'https://user:secret@host', 'https://host?query=1',
+                             'https://host:bad', ''):
+                with self.subTest(base_url=base_url):
+                    with self.assertRaises(LocalOAuthError):
+                        LocalOAuthClient(
+                            _local_oauth(Path(directory) / 'tokens.jsonl'),
+                            base_url=base_url)
+
     def test_uses_sandbox_endpoint_and_preserves_request_secrets_in_memory_only(self):
         with tempfile.TemporaryDirectory() as directory:
             response = mock.Mock()
