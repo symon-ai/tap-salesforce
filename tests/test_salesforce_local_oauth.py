@@ -77,7 +77,8 @@ class LocalOAuthConfigTests(unittest.TestCase):
                 is_sandbox='true'))
 
     def test_rejects_invalid_explicit_base_url(self):
-        for base_url in (None, '', '   ', 123):
+        for base_url in (None, '', '   ', 123, 'http://customer.example',
+                         'ftp://customer.example', 'https:///missing-host'):
             with self.subTest(base_url=base_url):
                 with self.assertRaisesRegex(LocalOAuthError, 'base_url'):
                     validate_local_oauth_config(_local_oauth(

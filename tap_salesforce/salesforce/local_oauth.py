@@ -3,6 +3,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -38,6 +39,10 @@ def validate_local_oauth_config(local_oauth):
         if not isinstance(base_url, str) or not base_url.strip():
             raise LocalOAuthError(
                 'local_oauth.base_url must be a non-empty string')
+        parsed_base_url = urlsplit(base_url.strip())
+        if parsed_base_url.scheme != 'https' or not parsed_base_url.hostname:
+            raise LocalOAuthError(
+                'local_oauth.base_url must be an HTTPS URL')
 
     log_path = local_oauth.get(
         'refresh_token_log_path',
