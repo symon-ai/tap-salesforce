@@ -76,8 +76,66 @@ class LocalOAuthConfigTests(unittest.TestCase):
                 'tokens.jsonl',
                 is_sandbox='true'))
 
+    def test_rejects_invalid_explicit_base_url(self):
+        for base_url in (None, '', '   ', 123):
+            with self.subTest(base_url=base_url):
+                with self.assertRaisesRegex(LocalOAuthError, 'base_url'):
+                    validate_local_oauth_config(_local_oauth(
+                        'tokens.jsonl', base_url=base_url))
+
 
 class LocalOAuthClientTests(unittest.TestCase):
+    def test_token_response_routing_and_default_hosts(self):
+        cases = [
+            ({}, {}, 'https://login.salesforce.com'),
+            ({'is_sandbox': True}, {}, 'https://test.salesforce.com'),
+            ({'base_url': 'https://customer.example/'}, {},
+             'https://customer.example'),
+            ({'base_url': 'https://customer.example/', 'is_sandbox': True},
+             {'service_url': 'https://service.example/'},
+             'https://service.example'),
+            ({}, {'instance_url': 'https://instance.example/',
+                  'service_url': 'https://service.example'},
+             'https://instance.example'),
+            ({}, {'instance_url': ' ', 'service_url': 'https://service.example'},
+             'https://service.example'),
+            ({}, {'instance_url': None, 'service_url': ''},
+             'https://login.salesforce.com'),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            for config, routing, expected_url in cases:
+                with self.subTest(config=config, routing=routing):
+                    session = mock.Mock()
+                    session.post.return_value.json.return_value = {
+                        'access_token': 'opaque-token', **routing}
+                    client = LocalOAuthClient(_local_oauth(
+                        Path(directory) / 'tokens.jsonl', **config),
+                        session=session)
+
+                    credentials = client.fetch_credentials('startup')
+
+                    self.assertEqual(credentials['instance_url'], expected_url)
+                    self.assertEqual(credentials['access_token'], 'opaque-token')
+                    expected_base = config.get(
+                        'base_url',
+                        'https://test.salesforce.com' if config.get('is_sandbox')
+                        else 'https://login.salesforce.com').rstrip('/')
+                    self.assertEqual(session.post.call_args.args[0],
+                                     expected_base + '/services/oauth2/token')
+                    self.assertNotIn('verify', session.post.call_args.kwargs)
+                    self.assertNotIn('cert', session.post.call_args.kwargs)
+
+    def test_missing_access_token_still_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = mock.Mock()
+            session.post.return_value.json.return_value = {
+                'service_url': 'https://service.example'}
+            client = LocalOAuthClient(_local_oauth(
+                Path(directory) / 'tokens.jsonl'), session=session)
+
+            with self.assertRaisesRegex(LocalOAuthError, 'missing access_token'):
+                client.fetch_credentials('startup')
+
     def test_uses_sandbox_endpoint_and_preserves_request_secrets_in_memory_only(self):
         with tempfile.TemporaryDirectory() as directory:
             response = mock.Mock()
@@ -158,6 +216,51 @@ class LocalOAuthClientTests(unittest.TestCase):
 
 
 class LocalOAuthSalesforceTests(unittest.TestCase):
+    @mock.patch('tap_salesforce.salesforce.requests.Session')
+    def test_configured_url_flows_through_login_refresh_and_api(self, session_class):
+        with tempfile.TemporaryDirectory() as directory:
+            config = _tap_config(_local_oauth(
+                Path(directory) / 'tokens.jsonl',
+                base_url='https://customer.example/'))
+            validate_config(config)
+            session = session_class.return_value
+            responses = []
+            for routing in (
+                    {'instance_url': 'https://instance.example',
+                     'service_url': 'https://ignored.example'},
+                    {'service_url': 'https://service.example'},
+                    {}):
+                response = mock.Mock()
+                response.json.return_value = {
+                    'access_token': 'opaque-token', **routing}
+                responses.append(response)
+            session.post.side_effect = responses
+            session.get.return_value.headers = {}
+            salesforce = Salesforce(
+                default_start_date=config['start_date'],
+                source_type=config['source_type'],
+                object_name=config['object_name'],
+                auth_mode=resolve_auth_mode(config),
+                local_oauth=config['local_oauth'])
+            salesforce.login()
+            self.assertEqual(salesforce.instance_url, 'https://instance.example')
+
+            salesforce.refresh_check_after_seconds = 0
+            for expected_url in ('https://service.example',
+                                 'https://customer.example'):
+                salesforce._make_request(
+                    'GET', salesforce.instance_url + '/services/data/v52.0/query',
+                    headers=salesforce._get_standard_headers())
+                self.assertEqual(salesforce.instance_url, expected_url)
+                self.assertEqual(session.get.call_args.args[0],
+                                 expected_url + '/services/data/v52.0/query')
+                self.assertEqual(session.get.call_args.kwargs['headers'][
+                    'Authorization'], 'Bearer opaque-token')
+
+            self.assertEqual(
+                [call.args[0] for call in session.post.call_args_list],
+                ['https://customer.example/services/oauth2/token'] * 3)
+
     @mock.patch.object(Salesforce, '_login_local')
     def test_existing_refresh_reasons_dispatch_to_local_oauth(self, login_local):
         with tempfile.TemporaryDirectory() as directory:

@@ -33,6 +33,12 @@ def validate_local_oauth_config(local_oauth):
     if not isinstance(is_sandbox, bool):
         raise LocalOAuthError('local_oauth.is_sandbox must be a boolean')
 
+    if 'base_url' in local_oauth:
+        base_url = local_oauth['base_url']
+        if not isinstance(base_url, str) or not base_url.strip():
+            raise LocalOAuthError(
+                'local_oauth.base_url must be a non-empty string')
+
     log_path = local_oauth.get(
         'refresh_token_log_path',
         DEFAULT_REFRESH_TOKEN_LOG_PATH)
@@ -50,6 +56,12 @@ class LocalOAuthClient:
         self.client_secret = local_oauth['client_secret']
         self.refresh_token = local_oauth['refresh_token']
         self.is_sandbox = local_oauth.get('is_sandbox', False)
+        default_base_url = (
+            'https://test.salesforce.com'
+            if self.is_sandbox
+            else 'https://login.salesforce.com')
+        self.base_url = local_oauth.get(
+            'base_url', default_base_url).strip().rstrip('/')
         self.refresh_token_log_path = Path(local_oauth.get(
             'refresh_token_log_path',
             DEFAULT_REFRESH_TOKEN_LOG_PATH))
@@ -58,8 +70,7 @@ class LocalOAuthClient:
 
     @property
     def token_url(self):
-        domain = 'test.salesforce.com' if self.is_sandbox else 'login.salesforce.com'
-        return 'https://{}/services/oauth2/token'.format(domain)
+        return '{}/services/oauth2/token'.format(self.base_url)
 
     def fetch_credentials(self, reason):
         if reason not in LOCAL_OAUTH_REASONS:
@@ -94,13 +105,14 @@ class LocalOAuthClient:
                 'Local OAuth token endpoint returned invalid JSON') from exc
 
         access_token = payload.get('access_token')
-        instance_url = payload.get('instance_url')
+        instance_url = next((
+            value.strip().rstrip('/')
+            for value in (payload.get('instance_url'), payload.get('service_url'))
+            if isinstance(value, str) and value.strip()
+        ), self.base_url)
         if not isinstance(access_token, str) or not access_token.strip():
             raise LocalOAuthError(
                 'Local OAuth response missing access_token')
-        if not isinstance(instance_url, str) or not instance_url.strip():
-            raise LocalOAuthError(
-                'Local OAuth response missing instance_url')
 
         returned_refresh_token = payload.get('refresh_token')
         has_new_refresh_token = (

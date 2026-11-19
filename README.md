@@ -144,7 +144,12 @@ Before preparing the config:
    omit `token_broker`, and add:
 
 The stored Salesforce access token and instance URL are not required in
-`local_oauth`; the refresh-token exchange returns fresh values.
+`local_oauth`. Set optional `local_oauth.base_url` to a customer-specific base URL
+for token exchanges (for example, `https://customer.example.com`). When omitted,
+it defaults to `https://login.salesforce.com`, or `https://test.salesforce.com`
+when `is_sandbox` is true. API requests use the token response's `instance_url`,
+then `service_url`, then the configured/default base URL. This precedence applies
+to every refresh; token exchanges continue to use the configured/default URL.
 
 ```json
 {
