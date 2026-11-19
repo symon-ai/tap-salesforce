@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from requests import Response
+
 from tap_salesforce import resolve_auth_mode, validate_config
 from tap_salesforce.salesforce import Salesforce
 from tap_salesforce.salesforce.local_oauth import (
@@ -261,6 +263,99 @@ class LocalOAuthSalesforceTests(unittest.TestCase):
             self.assertEqual(
                 [call.args[0] for call in session.post.call_args_list],
                 ['https://customer.example/services/oauth2/token'] * 3)
+
+    @mock.patch('tap_salesforce.salesforce.requests.Session')
+    def test_refresh_replaces_full_api_base_preserving_request_suffix(self, session_class):
+        transitions = [
+            ('https://old.example/proxy', 'https://new.example'),
+            ('https://old.example', 'https://new.example/proxy'),
+            ('https://old.example/services/proxy', 'https://new.example/new/proxy'),
+            ('https://old.example', 'https://new.example'),
+        ]
+        suffixes = [
+            '/services/data/v52.0/queryAll?q=SELECT%20Id%20FROM%20Account',
+            '/services/data/v52.0/sobjects/Account/describe',
+            '/services/async/52.0/job/123/batch/456/result/789',
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            for reason in ('periodic', 'invalid_session'):
+                for old_base, new_base in transitions:
+                    for suffix in suffixes:
+                        with self.subTest(reason=reason, old=old_base,
+                                          new=new_base, suffix=suffix):
+                            session = mock.Mock()
+                            session_class.return_value = session
+                            session.post.return_value.json.side_effect = [
+                                {'access_token': 'old-access', 'instance_url': old_base},
+                                {'access_token': 'new-access', 'service_url': new_base},
+                            ]
+                            success = Response()
+                            success.status_code = 200
+                            invalid = Response()
+                            invalid.status_code = 401
+                            invalid._content = b'[{"errorCode":"INVALID_SESSION_ID"}]'
+                            session.get.side_effect = (
+                                [invalid, success] if reason == 'invalid_session'
+                                else [success])
+                            salesforce = Salesforce(
+                                default_start_date='2020-01-01T00:00:00Z',
+                                source_type='object', object_name='Account',
+                                auth_mode='local',
+                                local_oauth=_local_oauth(
+                                    Path(directory) / 'tokens.jsonl',
+                                    base_url='https://login.example/oauth/proxy'))
+                            salesforce.login()
+                            salesforce.refresh_check_after_seconds = (
+                                0 if reason == 'periodic' else None)
+                            request_url = salesforce.instance_url + suffix
+                            params = {'include': 'details'}
+                            headers = salesforce._get_standard_headers()
+
+                            result = salesforce._make_request(
+                                'GET', request_url, headers=headers,
+                                params=params, stream=True)
+
+                            self.assertIs(result, success)
+                            self.assertEqual(salesforce.instance_url, new_base)
+                            self.assertEqual(session.get.call_args.args[0],
+                                             new_base + suffix)
+                            self.assertEqual(session.get.call_args.kwargs['params'],
+                                             params)
+                            self.assertTrue(session.get.call_args.kwargs['stream'])
+                            self.assertEqual(headers['Authorization'],
+                                             'Bearer new-access')
+                            self.assertEqual(session.get.call_count,
+                                             2 if reason == 'invalid_session' else 1)
+                            if reason == 'invalid_session':
+                                self.assertEqual(session.get.call_args_list[0].args[0],
+                                                 request_url)
+                            self.assertEqual(
+                                [call.args[0] for call in session.post.call_args_list],
+                                ['https://login.example/oauth/proxy/services/oauth2/token'] * 2)
+
+    @mock.patch('tap_salesforce.salesforce.requests.Session')
+    def test_request_without_refresh_preserves_full_api_url(self, session_class):
+        with tempfile.TemporaryDirectory() as directory:
+            session = session_class.return_value
+            session.post.return_value.json.return_value = {
+                'access_token': 'current-access',
+                'service_url': 'https://instance.example/services/proxy',
+            }
+            session.get.return_value.headers = {}
+            salesforce = Salesforce(
+                default_start_date='2020-01-01T00:00:00Z',
+                source_type='object', object_name='Account', auth_mode='local',
+                local_oauth=_local_oauth(Path(directory) / 'tokens.jsonl'))
+            salesforce.login()
+            salesforce.refresh_check_after_seconds = None
+            url = salesforce.instance_url + '/services/data/v52.0/queryAll?q=Id%20Name'
+
+            salesforce._make_request('GET', url, params={'q': 'SELECT Id FROM Account'})
+
+            self.assertEqual(session.get.call_args.args[0], url)
+            self.assertEqual(session.get.call_args.kwargs['params'],
+                             {'q': 'SELECT Id FROM Account'})
+            session.post.assert_called_once()
 
     @mock.patch.object(Salesforce, '_login_local')
     def test_existing_refresh_reasons_dispatch_to_local_oauth(self, login_local):

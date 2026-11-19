@@ -150,6 +150,9 @@ it defaults to `https://login.salesforce.com`, or `https://test.salesforce.com`
 when `is_sandbox` is true. API requests use the token response's `instance_url`,
 then `service_url`, then the configured/default base URL. This precedence applies
 to every refresh; token exchanges continue to use the configured/default URL.
+Selected API base URLs may include a path prefix. Refresh replaces the entire
+previous base, including that prefix, while preserving the API request suffix
+and query parameters.
 
 ```json
 {

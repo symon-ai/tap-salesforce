@@ -373,13 +373,14 @@ class Salesforce():
     def _get_standard_headers(self):
         return {"Authorization": "Bearer {}".format(self.access_token)}
 
-    def _with_current_instance_url(self, url):
+    def _with_current_instance_url(self, url, previous_instance_url):
         request_url = urlsplit(url)
+        previous_instance_path = urlsplit(previous_instance_url).path.rstrip('/')
         instance_url = urlsplit(self.instance_url)
         return urlunsplit((
             instance_url.scheme,
             instance_url.netloc,
-            request_url.path,
+            instance_url.path.rstrip('/') + request_url.path[len(previous_instance_path):],
             request_url.query,
             request_url.fragment,
         ))
@@ -439,12 +440,13 @@ class Salesforce():
                       log_body=True,
                       invalid_session_retried=False):
         request_timeout = 5 * 60  # 5 minute request timeout
+        previous_instance_url = self.instance_url
         if self._validate_broker_token_if_due():
             refreshed_headers = self._with_refreshed_auth_header(headers)
             if headers is not None:
                 headers.update(refreshed_headers)
             headers = refreshed_headers
-            url = self._with_current_instance_url(url)
+            url = self._with_current_instance_url(url, previous_instance_url)
 
         try:
             if http_method == "GET":
@@ -481,13 +483,14 @@ class Salesforce():
         except RequestException as ex:
             if (not invalid_session_retried
                     and self._is_invalid_session_error(ex)):
+                previous_instance_url = self.instance_url
                 self._refresh_auth(reason='invalid_session')
                 refreshed_headers = self._with_refreshed_auth_header(headers)
                 if headers is not None:
                     headers.update(refreshed_headers)
                 return self._make_request(
                     http_method,
-                    self._with_current_instance_url(url),
+                    self._with_current_instance_url(url, previous_instance_url),
                     headers=refreshed_headers,
                     body=body,
                     stream=stream,

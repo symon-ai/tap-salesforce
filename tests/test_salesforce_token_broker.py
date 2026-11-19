@@ -281,7 +281,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
     def test_request_validates_due_token_before_sending(self, mock_fetch):
         sf = self._broker_salesforce()
         sf._set_session_credentials(
-            'old-access', 'https://instance.salesforce.com', 'v-old')
+            'old-access', 'https://instance.salesforce.com/proxy', 'v-old')
         sf.refresh_check_after_seconds = 900
         sf._last_broker_check_at = 100
 
@@ -304,7 +304,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
                     return_value=success_response) as mock_get:
                 sf._make_request(
                     'GET',
-                    'https://instance.salesforce.com/services/data/v52.0/queryAll',
+                    'https://instance.salesforce.com/proxy/services/data/v52.0/queryAll',
                     headers=headers)
 
         mock_fetch.assert_called_once_with(
@@ -373,7 +373,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
 
         mock_fetch.return_value = {
             'access_token': 'new-access',
-            'instance_url': 'https://new-instance.salesforce.com',
+            'instance_url': 'https://new-instance.salesforce.com/new/proxy',
             'token_version': 'v-new',
         }
 
@@ -390,7 +390,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         self.assertEqual(retry_headers['X-SFDC-Session'], 'new-access')
         self.assertEqual(
             mock_get.call_args_list[1].args[0],
-            'https://new-instance.salesforce.com/services/data/v52.0/queryAll')
+            'https://new-instance.salesforce.com/new/proxy/services/data/v52.0/queryAll')
         mock_fetch.assert_called_once_with(
             endpoint='https://broker.example/token',
             reason='invalid_session',
@@ -402,7 +402,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
     def test_invalid_session_updates_headers_for_later_rest_pages(self, mock_fetch):
         sf = self._broker_salesforce()
         sf._set_session_credentials(
-            'old-access', 'https://instance.salesforce.com', 'v-old')
+            'old-access', 'https://instance.salesforce.com/proxy', 'v-old')
 
         invalid_response = mock.Mock()
         invalid_response.json.return_value = [{
@@ -430,7 +430,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
 
         mock_fetch.return_value = {
             'access_token': 'new-access',
-            'instance_url': 'https://instance.salesforce.com',
+            'instance_url': 'https://instance.salesforce.com/new/proxy',
             'token_version': 'v-new',
         }
 
@@ -440,7 +440,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
                 'get',
                 side_effect=[invalid_response, first_page, second_page]) as mock_get:
             records = list(Rest(sf)._sync_records(
-                'https://instance.salesforce.com/services/data/v52.0/queryAll',
+                'https://instance.salesforce.com/proxy/services/data/v52.0/queryAll',
                 headers,
                 {'q': 'SELECT Id FROM Account'}))
 
@@ -451,11 +451,19 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             mock_get.call_args_list[2].kwargs['headers']['Authorization'],
             'Bearer new-access')
         mock_fetch.assert_called_once()
+        self.assertEqual(
+            [call.args[0] for call in mock_get.call_args_list],
+            [
+                'https://instance.salesforce.com/proxy/services/data/v52.0/queryAll',
+                'https://instance.salesforce.com/new/proxy/services/data/v52.0/queryAll',
+                'https://instance.salesforce.com/new/proxy/services/data/v52.0/query/next',
+            ])
 
     @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
     def test_invalid_session_retries_post_once_on_explicit_error(self, mock_fetch):
         sf = self._broker_salesforce()
-        sf._set_session_credentials('old-access', 'https://instance.salesforce.com', 'v-old')
+        sf._set_session_credentials(
+            'old-access', 'https://instance.salesforce.com/services/proxy', 'v-old')
 
         invalid_response = mock.Mock()
         invalid_response.json.return_value = [{
@@ -471,14 +479,14 @@ class SalesforceBrokerModeTests(unittest.TestCase):
 
         mock_fetch.return_value = {
             'access_token': 'new-access',
-            'instance_url': 'https://instance.salesforce.com',
+            'instance_url': 'https://instance.salesforce.com/replacement',
             'token_version': 'v-new',
         }
 
         with mock.patch.object(sf.session, 'post', side_effect=[invalid_response, success_response]) as mock_post:
             response = sf._make_request(
                 'POST',
-                'https://instance.salesforce.com/services/async/52.0/job',
+                'https://instance.salesforce.com/services/proxy/services/async/52.0/job',
                 headers={'X-SFDC-Session': 'old-access'},
                 body='{"operation":"queryAll"}')
 
@@ -487,6 +495,40 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         retry_headers = mock_post.call_args_list[1].kwargs['headers']
         self.assertEqual(retry_headers['Authorization'], 'Bearer new-access')
         self.assertEqual(retry_headers['X-SFDC-Session'], 'new-access')
+        mock_fetch.assert_called_once()
+        self.assertEqual(
+            mock_post.call_args.args[0],
+            'https://instance.salesforce.com/replacement/services/async/52.0/job')
+        self.assertEqual(mock_post.call_args.kwargs['data'],
+                         '{"operation":"queryAll"}')
+
+    @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
+    def test_invalid_session_after_base_refresh_does_not_retry_again(self, mock_fetch):
+        sf = self._broker_salesforce()
+        sf._set_session_credentials(
+            'old-access', 'https://instance.salesforce.com/proxy', 'v-old')
+        invalid_response = mock.Mock()
+        invalid_response.status_code = 401
+        invalid_response.raise_for_status.side_effect = HTTPError(
+            response=invalid_response)
+        mock_fetch.return_value = {
+            'access_token': 'new-access',
+            'instance_url': 'https://new-instance.salesforce.com',
+            'token_version': 'v-new',
+        }
+
+        with mock.patch.object(
+                sf.session, 'get', return_value=invalid_response) as mock_get:
+            with self.assertRaises(HTTPError):
+                sf._make_request(
+                    'GET',
+                    sf.instance_url + '/services/data/v52.0/queryAll',
+                    headers=sf._get_standard_headers())
+
+        self.assertEqual(mock_get.call_count, 2)
+        self.assertEqual(
+            mock_get.call_args.args[0],
+            'https://new-instance.salesforce.com/services/data/v52.0/queryAll')
         mock_fetch.assert_called_once()
 
     @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
