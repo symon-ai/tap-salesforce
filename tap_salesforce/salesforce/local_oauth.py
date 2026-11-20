@@ -1,8 +1,12 @@
 import json
 import logging
 import os
+import re
+import socket
 from datetime import datetime, timezone
+from ipaddress import ip_address
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -19,6 +23,42 @@ class LocalOAuthError(Exception):
     """Raised when local Salesforce OAuth authentication fails."""
 
 
+def _https_base_url(value, field):
+    if isinstance(value, str) and not re.search(r'[\s\x00-\x1f\x7f\\?#]', value):
+        try:
+            url = urlsplit(value)
+            host = (url.hostname or '').rstrip('.')
+            port = url.port
+            if (url.scheme == 'https' and port != 0
+                    and re.fullmatch(r'(?:\[[0-9a-fA-F:.]+\]|[a-zA-Z0-9.-]+)(?::[0-9]+)?',
+                                     url.netloc)
+                    and _is_public_hostname(host)):
+                return value.rstrip('/')
+        except ValueError:
+            pass
+    raise LocalOAuthError(f'{field} must be a public HTTPS base URL')
+
+
+def _is_public_hostname(host):
+    try:
+        address = ip_address(host)
+    except ValueError:
+        # Reject noncanonical IPv4 forms that the system resolver may accept.
+        try:
+            socket.inet_aton(host)
+        except OSError:
+            return (
+                '.' in host
+                and not host.endswith(('.localhost', '.local', '.internal',
+                                       '.localdomain', '.home.arpa'))
+                and all(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', label)
+                        for label in host.split('.')))
+        return False
+    address = getattr(address, 'ipv4_mapped', None) or address
+    return (address.is_global and not address.is_multicast
+            and not getattr(address, 'is_site_local', False))
+
+
 def validate_local_oauth_config(local_oauth):
     if not isinstance(local_oauth, dict):
         raise LocalOAuthError('local_oauth must be an object')
@@ -32,6 +72,9 @@ def validate_local_oauth_config(local_oauth):
     is_sandbox = local_oauth.get('is_sandbox', False)
     if not isinstance(is_sandbox, bool):
         raise LocalOAuthError('local_oauth.is_sandbox must be a boolean')
+
+    if 'base_url' in local_oauth:
+        _https_base_url(local_oauth['base_url'], 'local_oauth.base_url')
 
     log_path = local_oauth.get(
         'refresh_token_log_path',
@@ -50,6 +93,9 @@ class LocalOAuthClient:
         self.client_secret = local_oauth['client_secret']
         self.refresh_token = local_oauth['refresh_token']
         self.is_sandbox = local_oauth.get('is_sandbox', False)
+        self.base_url = local_oauth.get('base_url')
+        if self.base_url is not None:
+            self.base_url = self.base_url.rstrip('/')
         self.refresh_token_log_path = Path(local_oauth.get(
             'refresh_token_log_path',
             DEFAULT_REFRESH_TOKEN_LOG_PATH))
@@ -58,6 +104,8 @@ class LocalOAuthClient:
 
     @property
     def token_url(self):
+        if self.base_url:
+            return f'{self.base_url}/services/oauth2/token'
         domain = 'test.salesforce.com' if self.is_sandbox else 'login.salesforce.com'
         return 'https://{}/services/oauth2/token'.format(domain)
 
@@ -76,7 +124,10 @@ class LocalOAuthClient:
                     'client_secret': self.client_secret,
                     'refresh_token': self.refresh_token,
                 },
-                timeout=LOCAL_OAUTH_REQUEST_TIMEOUT_SECONDS)
+                timeout=LOCAL_OAUTH_REQUEST_TIMEOUT_SECONDS,
+                allow_redirects=False)
+            if 300 <= response.status_code < 400:
+                raise LocalOAuthError('Local OAuth token endpoint returned a redirect')
             response.raise_for_status()
         except requests.RequestException as exc:
             LOGGER.error(
@@ -93,14 +144,14 @@ class LocalOAuthClient:
             raise LocalOAuthError(
                 'Local OAuth token endpoint returned invalid JSON') from exc
 
+        if not isinstance(payload, dict):
+            raise LocalOAuthError('Local OAuth token endpoint returned invalid JSON')
+
         access_token = payload.get('access_token')
-        instance_url = payload.get('instance_url')
         if not isinstance(access_token, str) or not access_token.strip():
             raise LocalOAuthError(
                 'Local OAuth response missing access_token')
-        if not isinstance(instance_url, str) or not instance_url.strip():
-            raise LocalOAuthError(
-                'Local OAuth response missing instance_url')
+        instance_url = self._api_base_url(payload)
 
         returned_refresh_token = payload.get('refresh_token')
         has_new_refresh_token = (
@@ -132,6 +183,15 @@ class LocalOAuthClient:
                 payload.get('issued_at')
                 or self._format_timestamp(exchanged_at)),
         }
+
+    def _api_base_url(self, payload):
+        for field in ('instance_url', 'service_url'):
+            value = payload.get(field)
+            if isinstance(value, str) and value.strip():
+                return _https_base_url(value, f'Local OAuth response {field}')
+        if self.base_url:
+            return self.base_url
+        raise LocalOAuthError('Local OAuth response missing instance_url')
 
     def _prepare_refresh_token_log(self):
         try:

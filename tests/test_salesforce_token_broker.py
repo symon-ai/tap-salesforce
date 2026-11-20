@@ -493,7 +493,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
     def test_invalid_session_does_not_retry_network_failures(self, mock_fetch):
         sf = self._broker_salesforce()
         sf._set_session_credentials('old-access', 'https://instance.salesforce.com', 'v-old')
-        make_request = getattr(sf._make_request, '__wrapped__', sf._make_request)
+        make_request = sf._make_request_with_backoff.__wrapped__
 
         with mock.patch.object(
                 sf.session,
@@ -513,7 +513,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
     def test_invalid_session_does_not_retry_uncertain_failures(self, mock_fetch):
         sf = self._broker_salesforce()
         sf._set_session_credentials('old-access', 'https://instance.salesforce.com', 'v-old')
-        make_request = getattr(sf._make_request, '__wrapped__', sf._make_request)
+        make_request = sf._make_request_with_backoff.__wrapped__
 
         invalid_response = mock.Mock()
         invalid_response.json.side_effect = ValueError('not json')

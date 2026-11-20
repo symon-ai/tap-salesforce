@@ -422,6 +422,18 @@ class Salesforce():
                                                                        self.quota_percent_per_run)
             raise SymonException(partial_message, 'salesforce.SalesforceApiError') 
 
+    def _make_request(self, http_method, url, headers=None, body=None,
+                      stream=False, params=None, log_body=True):
+        if self.auth_mode == 'local':
+            if not url.startswith(f'{self.instance_url}/'):
+                raise LocalOAuthError('Salesforce API request left the OAuth API base')
+            # Capture the endpoint relative to the original base once, so both
+            # authentication refresh and network backoff can change the base.
+            url = url[len(self.instance_url):]
+        return self._make_request_with_backoff(
+            http_method, url, headers=headers, body=body,
+            stream=stream, params=params, log_body=log_body)
+
     # pylint: disable=too-many-arguments
     @backoff.on_exception(backoff.expo,
                           (requests.exceptions.ConnectionError,
@@ -429,7 +441,7 @@ class Salesforce():
                           max_tries=10,
                           factor=2,
                           on_backoff=log_backoff_attempt)
-    def _make_request(self,
+    def _make_request_with_backoff(self,
                       http_method,
                       url,
                       headers=None,
@@ -439,32 +451,44 @@ class Salesforce():
                       log_body=True,
                       invalid_session_retried=False):
         request_timeout = 5 * 60  # 5 minute request timeout
-        if self._validate_broker_token_if_due():
+        local = self.auth_mode == 'local'
+        refreshed = self._validate_broker_token_if_due()
+        if local:
+            request_url = f'{self.instance_url}{url}'
+            headers = dict(headers or {})
+            if 'Authorization' in headers:
+                headers['Authorization'] = f'Bearer {self.access_token}'
+            if 'X-SFDC-Session' in headers:
+                headers['X-SFDC-Session'] = self.access_token
+        elif refreshed:
             refreshed_headers = self._with_refreshed_auth_header(headers)
             if headers is not None:
                 headers.update(refreshed_headers)
             headers = refreshed_headers
             url = self._with_current_instance_url(url)
+        if not local:
+            request_url = url
+        redirect_options = {'allow_redirects': False} if local else {}
 
         try:
             if http_method == "GET":
                 LOGGER.info("Making %s request to %s with params: %s",
-                            http_method, url, params)
-                resp = self.session.get(url,
+                            http_method, request_url, params)
+                resp = self.session.get(request_url,
                                         headers=headers,
                                         stream=stream,
                                         params=params,
-                                        timeout=request_timeout,)
+                                        timeout=request_timeout, **redirect_options)
             elif http_method == "POST":
                 if log_body:
                     LOGGER.info("Making %s request to %s with body %s",
-                                http_method, url, body)
+                                http_method, request_url, body)
                 else:
-                    LOGGER.info("Making %s request to %s", http_method, url)
-                resp = self.session.post(url,
+                    LOGGER.info("Making %s request to %s", http_method, request_url)
+                resp = self.session.post(request_url,
                                          headers=headers,
                                          data=body,
-                                         timeout=request_timeout,)
+                                         timeout=request_timeout, **redirect_options)
             else:
                 raise TapSalesforceException("Unsupported HTTP method")
         except requests.exceptions.ConnectionError as connection_err:
@@ -476,6 +500,10 @@ class Salesforce():
                 'Took longer than %s seconds to hear from the server', request_timeout)
             raise timeout_err
 
+        if local and 300 <= resp.status_code < 400:
+            resp.close()
+            raise LocalOAuthError('Salesforce API returned a redirect')
+
         try:
             resp.raise_for_status()
         except RequestException as ex:
@@ -485,9 +513,9 @@ class Salesforce():
                 refreshed_headers = self._with_refreshed_auth_header(headers)
                 if headers is not None:
                     headers.update(refreshed_headers)
-                return self._make_request(
+                return self._make_request_with_backoff(
                     http_method,
-                    self._with_current_instance_url(url),
+                    url if local else self._with_current_instance_url(url),
                     headers=refreshed_headers,
                     body=body,
                     stream=stream,

@@ -146,6 +146,17 @@ Before preparing the config:
 The stored Salesforce access token and instance URL are not required in
 `local_oauth`; the refresh-token exchange returns fresh values.
 
+For a custom Salesforce OAuth endpoint, optionally set `local_oauth.base_url`
+to a trusted public HTTPS base such as `https://sales.example.com/gateway`
+(no query, fragment, user info, or `/services/oauth2/token` suffix). The tap
+appends `/services/oauth2/token` and sends the refresh credentials there; only
+use credentials issued for that endpoint. Do not send reusable platform
+credentials to an arbitrary host. Without `base_url`, the token endpoint is
+`login.salesforce.com`, or `test.salesforce.com` when `is_sandbox` is true.
+API calls use the response's `instance_url`, then `service_url`, then
+`base_url`. The exchange fails if none is available. Local OAuth token and API
+requests do not follow redirects and use normal TLS certificate verification.
+
 ```json
 {
   "auth_mode": "local",
