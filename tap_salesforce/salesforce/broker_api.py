@@ -1,5 +1,6 @@
 """Direct, public HTTPS transport for the Salesforce API, not the broker RPC."""
 
+import os
 import socket
 import sys
 from ipaddress import ip_address, ip_network
@@ -84,7 +85,8 @@ class _PublicHTTPSAdapter(HTTPAdapter):
         self.poolmanager.pool_classes_by_scheme = {'https': _PublicHTTPSConnectionPool}
 
     def send(self, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):
-        if not request.url.startswith('https://') or verify is not True or proxies:
+        verified = verify is True or (isinstance(verify, str) and bool(verify))
+        if not request.url.startswith('https://') or not verified or proxies:
             raise BrokerAPIError('Salesforce API requires direct HTTPS with TLS verification')
         return super().send(request, stream=stream, timeout=timeout, verify=verify,
                             cert=cert, proxies=proxies)
@@ -92,5 +94,8 @@ class _PublicHTTPSAdapter(HTTPAdapter):
 
 def configure_broker_api_session(session):
     session.trust_env = False
+    if session.verify is True:
+        session.verify = (os.environ.get('REQUESTS_CA_BUNDLE')
+                          or os.environ.get('CURL_CA_BUNDLE') or True)
     session.adapters.clear()
     session.mount('https://', _PublicHTTPSAdapter())
