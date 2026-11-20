@@ -9,12 +9,14 @@ import singer
 import singer.utils as singer_utils
 from singer import metadata, metrics
 
+from tap_salesforce.salesforce.broker_api import BrokerAPIError, configure_broker_api_session
 from tap_salesforce.salesforce.bulk import Bulk
 from tap_salesforce.salesforce.rest import Rest
 from tap_salesforce.salesforce.report_rest import ReportRest
 from tap_salesforce.salesforce.local_oauth import (
     LocalOAuthClient,
-    LocalOAuthError)
+    LocalOAuthError,
+    _https_base_url)
 from tap_salesforce.salesforce.token_broker import (
     TokenBrokerError,
     fetch_broker_credentials)
@@ -241,6 +243,10 @@ class Salesforce():
         self.token_broker = token_broker or {}
         self.auth_mode = auth_mode or 'broker'
         self.session = requests.Session()
+        self.api_session = self.session
+        if self.auth_mode == 'broker':
+            self.api_session = requests.Session()
+            configure_broker_api_session(self.api_session)
         self.local_oauth_client = (
             LocalOAuthClient(local_oauth, session=self.session)
             if self.auth_mode == 'local'
@@ -373,16 +379,22 @@ class Salesforce():
     def _get_standard_headers(self):
         return {"Authorization": "Bearer {}".format(self.access_token)}
 
-    def _with_current_instance_url(self, url):
-        request_url = urlsplit(url)
-        instance_url = urlsplit(self.instance_url)
-        return urlunsplit((
-            instance_url.scheme,
-            instance_url.netloc,
-            request_url.path,
-            request_url.query,
-            request_url.fragment,
-        ))
+    def _api_policy_error(self, message):
+        error = LocalOAuthError if self.auth_mode == 'local' else BrokerAPIError
+        return error(message)
+
+    def _rest_continuation_url(self, url):
+        base = urlsplit(self.instance_url)
+        continuation = urlsplit(url)
+        if ((continuation.scheme or continuation.netloc)
+                and (continuation.scheme, continuation.netloc.lower())
+                != (base.scheme, base.netloc.lower())):
+            raise self._api_policy_error('Salesforce REST continuation left the API origin')
+        # Salesforce may return either a root-relative or gateway-prefixed cursor.
+        path = '/' + continuation.path.lstrip('/')
+        if not path.startswith(base.path + '/services/'):
+            path = base.path + path
+        return urlunsplit(base._replace(path=path, query=continuation.query))
 
     def _get_report_query_headers(self):
         return {"Authorization": "Bearer {}".format(self.access_token),
@@ -424,12 +436,11 @@ class Salesforce():
 
     def _make_request(self, http_method, url, headers=None, body=None,
                       stream=False, params=None, log_body=True):
-        if self.auth_mode == 'local':
-            if not url.startswith(f'{self.instance_url}/'):
-                raise LocalOAuthError('Salesforce API request left the OAuth API base')
-            # Capture the endpoint relative to the original base once, so both
-            # authentication refresh and network backoff can change the base.
-            url = url[len(self.instance_url):]
+        if not url.startswith(f'{self.instance_url}/'):
+            raise self._api_policy_error('Salesforce API request left the OAuth API base')
+        # Capture the endpoint relative to the original base once, so both
+        # authentication refresh and network backoff can change the base.
+        url = url[len(self.instance_url):]
         return self._make_request_with_backoff(
             http_method, url, headers=headers, body=body,
             stream=stream, params=params, log_body=log_body)
@@ -453,8 +464,8 @@ class Salesforce():
         request_timeout = 5 * 60  # 5 minute request timeout
         local = self.auth_mode == 'local'
         refreshed = self._validate_broker_token_if_due()
+        request_url = f'{self.instance_url}{url}'
         if local:
-            request_url = f'{self.instance_url}{url}'
             headers = dict(headers or {})
             if 'Authorization' in headers:
                 headers['Authorization'] = f'Bearer {self.access_token}'
@@ -465,30 +476,26 @@ class Salesforce():
             if headers is not None:
                 headers.update(refreshed_headers)
             headers = refreshed_headers
-            url = self._with_current_instance_url(url)
-        if not local:
-            request_url = url
-        redirect_options = {'allow_redirects': False} if local else {}
 
         try:
             if http_method == "GET":
                 LOGGER.info("Making %s request to %s with params: %s",
                             http_method, request_url, params)
-                resp = self.session.get(request_url,
+                resp = self.api_session.get(request_url,
                                         headers=headers,
                                         stream=stream,
                                         params=params,
-                                        timeout=request_timeout, **redirect_options)
+                                        timeout=request_timeout, allow_redirects=False)
             elif http_method == "POST":
                 if log_body:
                     LOGGER.info("Making %s request to %s with body %s",
                                 http_method, request_url, body)
                 else:
                     LOGGER.info("Making %s request to %s", http_method, request_url)
-                resp = self.session.post(request_url,
+                resp = self.api_session.post(request_url,
                                          headers=headers,
                                          data=body,
-                                         timeout=request_timeout, **redirect_options)
+                                         timeout=request_timeout, allow_redirects=False)
             else:
                 raise TapSalesforceException("Unsupported HTTP method")
         except requests.exceptions.ConnectionError as connection_err:
@@ -500,9 +507,9 @@ class Salesforce():
                 'Took longer than %s seconds to hear from the server', request_timeout)
             raise timeout_err
 
-        if local and 300 <= resp.status_code < 400:
+        if 300 <= resp.status_code < 400:
             resp.close()
-            raise LocalOAuthError('Salesforce API returned a redirect')
+            raise self._api_policy_error('Salesforce API returned a redirect')
 
         try:
             resp.raise_for_status()
@@ -515,7 +522,7 @@ class Salesforce():
                     headers.update(refreshed_headers)
                 return self._make_request_with_backoff(
                     http_method,
-                    url if local else self._with_current_instance_url(url),
+                    url,
                     headers=refreshed_headers,
                     body=body,
                     stream=stream,
@@ -550,9 +557,13 @@ class Salesforce():
                 task_auth_token=self.token_broker['task_auth_token'],
                 known_token_version=self._get_known_token_version(),
                 session=self.session)
+            try:
+                instance_url = _https_base_url(credentials['instance_url'], 'Salesforce API base')
+            except LocalOAuthError as exc:
+                raise TokenBrokerError(str(exc)) from exc
             self._set_session_credentials(
                 credentials['access_token'],
-                credentials['instance_url'],
+                instance_url,
                 credentials['token_version'])
             self._last_broker_check_at = time.monotonic()
             LOGGER.info("Token broker login successful")

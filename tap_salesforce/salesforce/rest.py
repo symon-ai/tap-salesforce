@@ -102,4 +102,5 @@ class Rest():
             if next_records_url is None:
                 break
 
-            url = "{}{}".format(self.sf.instance_url, next_records_url)
+            url = self.sf._rest_continuation_url(next_records_url)
+            params = None  # The cursor URL carries the continuation query.

@@ -256,6 +256,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         sf._last_broker_check_at = 100
 
         success_response = mock.Mock()
+        success_response.status_code = 200
         success_response.headers = {}
         success_response.raise_for_status = mock.Mock()
 
@@ -264,7 +265,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
                 'tap_salesforce.salesforce.time.monotonic',
                 return_value=999):
             with mock.patch.object(
-                    sf.session,
+                    sf.api_session,
                     'get',
                     return_value=success_response) as mock_get:
                 sf._make_request(
@@ -291,6 +292,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             'token_version': 'v-new',
         }
         success_response = mock.Mock()
+        success_response.status_code = 200
         success_response.headers = {}
         success_response.raise_for_status = mock.Mock()
 
@@ -299,7 +301,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
                 'tap_salesforce.salesforce.time.monotonic',
                 return_value=1000):
             with mock.patch.object(
-                    sf.session,
+                    sf.api_session,
                     'get',
                     return_value=success_response) as mock_get:
                 sf._make_request(
@@ -333,6 +335,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             'Token broker request failed')
 
         success_response = mock.Mock()
+        success_response.status_code = 200
         success_response.headers = {}
         success_response.raise_for_status = mock.Mock()
 
@@ -341,7 +344,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
                 'tap_salesforce.salesforce.time.monotonic',
                 side_effect=[1000, 1015]):
             with mock.patch.object(
-                    sf.session,
+                    sf.api_session,
                     'get',
                     return_value=success_response) as mock_get:
                 sf._make_request(
@@ -360,6 +363,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         sf._set_session_credentials('old-access', 'https://instance.salesforce.com', 'v-old')
 
         invalid_response = mock.Mock()
+        invalid_response.status_code = 400
         invalid_response.json.return_value = [{
             'errorCode': 'INVALID_SESSION_ID',
             'message': 'Session expired or invalid',
@@ -368,6 +372,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         invalid_response.raise_for_status.side_effect = HTTPError(response=invalid_response)
 
         success_response = mock.Mock()
+        success_response.status_code = 200
         success_response.headers = {}
         success_response.raise_for_status = mock.Mock()
 
@@ -377,7 +382,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             'token_version': 'v-new',
         }
 
-        with mock.patch.object(sf.session, 'get', side_effect=[invalid_response, success_response]) as mock_get:
+        with mock.patch.object(sf.api_session, 'get', side_effect=[invalid_response, success_response]) as mock_get:
             response = sf._make_request(
                 'GET',
                 'https://instance.salesforce.com/services/data/v52.0/queryAll',
@@ -405,6 +410,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             'old-access', 'https://instance.salesforce.com', 'v-old')
 
         invalid_response = mock.Mock()
+        invalid_response.status_code = 400
         invalid_response.json.return_value = [{
             'errorCode': 'INVALID_SESSION_ID',
             'message': 'Session expired or invalid',
@@ -413,6 +419,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             response=invalid_response)
 
         first_page = mock.Mock()
+        first_page.status_code = 200
         first_page.headers = {}
         first_page.raise_for_status = mock.Mock()
         first_page.json.return_value = {
@@ -421,6 +428,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         }
 
         second_page = mock.Mock()
+        second_page.status_code = 200
         second_page.headers = {}
         second_page.raise_for_status = mock.Mock()
         second_page.json.return_value = {
@@ -436,7 +444,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
 
         headers = {'Authorization': 'Bearer old-access'}
         with mock.patch.object(
-                sf.session,
+                sf.api_session,
                 'get',
                 side_effect=[invalid_response, first_page, second_page]) as mock_get:
             records = list(Rest(sf)._sync_records(
@@ -458,6 +466,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         sf._set_session_credentials('old-access', 'https://instance.salesforce.com', 'v-old')
 
         invalid_response = mock.Mock()
+        invalid_response.status_code = 400
         invalid_response.json.return_value = [{
             'errorCode': 'INVALID_SESSION_ID',
             'message': 'Session expired or invalid',
@@ -466,6 +475,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         invalid_response.raise_for_status.side_effect = HTTPError(response=invalid_response)
 
         success_response = mock.Mock()
+        success_response.status_code = 200
         success_response.headers = {}
         success_response.raise_for_status = mock.Mock()
 
@@ -475,7 +485,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             'token_version': 'v-new',
         }
 
-        with mock.patch.object(sf.session, 'post', side_effect=[invalid_response, success_response]) as mock_post:
+        with mock.patch.object(sf.api_session, 'post', side_effect=[invalid_response, success_response]) as mock_post:
             response = sf._make_request(
                 'POST',
                 'https://instance.salesforce.com/services/async/52.0/job',
@@ -496,14 +506,14 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         make_request = sf._make_request_with_backoff.__wrapped__
 
         with mock.patch.object(
-                sf.session,
+                sf.api_session,
                 'get',
                 side_effect=requests.exceptions.ConnectionError('network down')) as mock_get:
             with self.assertRaises(requests.exceptions.ConnectionError):
                 make_request(
                     sf,
                     'GET',
-                    'https://instance.salesforce.com/services/data/v52.0/queryAll',
+                    '/services/data/v52.0/queryAll',
                     headers={'Authorization': 'Bearer old-access'})
 
         mock_get.assert_called_once()
@@ -516,16 +526,17 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         make_request = sf._make_request_with_backoff.__wrapped__
 
         invalid_response = mock.Mock()
+        invalid_response.status_code = 500
         invalid_response.json.side_effect = ValueError('not json')
         invalid_response.text = 'unrecognized server error'
         invalid_response.raise_for_status.side_effect = HTTPError(response=invalid_response)
 
-        with mock.patch.object(sf.session, 'get', return_value=invalid_response) as mock_get:
+        with mock.patch.object(sf.api_session, 'get', return_value=invalid_response) as mock_get:
             with self.assertRaises(HTTPError):
                 make_request(
                     sf,
                     'GET',
-                    'https://instance.salesforce.com/services/data/v52.0/queryAll',
+                    '/services/data/v52.0/queryAll',
                     headers={'Authorization': 'Bearer old-access'})
 
         mock_get.assert_called_once()
@@ -546,6 +557,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
             response=invalid_response)
 
         success_response = mock.Mock()
+        success_response.status_code = 200
         success_response.headers = {}
         success_response.raise_for_status = mock.Mock()
 
@@ -556,7 +568,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
         }
 
         with mock.patch.object(
-                sf.session,
+                sf.api_session,
                 'get',
                 side_effect=[invalid_response, success_response]) as mock_get:
             response = sf._make_request(
