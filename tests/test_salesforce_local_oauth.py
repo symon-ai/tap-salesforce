@@ -121,6 +121,26 @@ class LocalOAuthClientTests(unittest.TestCase):
                                      token_host + '/services/oauth2/token')
                     self.assertNotIn('verify', session.post.call_args.kwargs)
 
+    def test_rejected_credentials_do_not_replace_previous_api_url(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = mock.Mock()
+            session.post.return_value.json.side_effect = [
+                {'access_token': 'access-1',
+                 'instance_url': 'https://api.example'},
+                {'service_url': 'https://rejected.example'},
+                {'access_token': 'access-2'},
+            ]
+            client = LocalOAuthClient(
+                _local_oauth(Path(directory) / 'tokens.jsonl'),
+                session=session, base_url='https://customer.example')
+            client.fetch_credentials('startup')
+
+            with self.assertRaisesRegex(LocalOAuthError, 'missing access_token'):
+                client.fetch_credentials('periodic')
+
+            credentials = client.fetch_credentials('invalid_session')
+            self.assertEqual(credentials['instance_url'], 'https://api.example')
+
     def test_uses_sandbox_endpoint_and_preserves_request_secrets_in_memory_only(self):
         with tempfile.TemporaryDirectory() as directory:
             response = mock.Mock()
@@ -229,6 +249,47 @@ class LocalOAuthSalesforceTests(unittest.TestCase):
             self.assertTrue(all(
                 call.args[0] == 'https://customer.example/services/oauth2/token'
                 for call in session.post.call_args_list))
+
+    @mock.patch('tap_salesforce.salesforce.requests.Session')
+    def test_refresh_without_routing_retains_previous_api_endpoint(
+            self, session_factory):
+        for alias in ('instance_url', 'service_url'):
+            for reason in ('periodic', 'invalid_session'):
+                with self.subTest(alias=alias, reason=reason):
+                    session = mock.Mock()
+                    session_factory.return_value = session
+                    session.get.return_value.headers = {}
+                    session.post.return_value.json.side_effect = [
+                        {'access_token': 'access-1',
+                         alias: 'https://api.example'},
+                        {'access_token': 'access-2'},
+                    ]
+                    with tempfile.TemporaryDirectory() as directory:
+                        salesforce = Salesforce(
+                            default_start_date='2020-01-01T00:00:00Z',
+                            source_type='object', object_name='Account',
+                            auth_mode='local',
+                            base_url='https://customer.example/',
+                            local_oauth=_local_oauth(
+                                Path(directory) / 'tokens.jsonl'))
+                        salesforce.login()
+                        salesforce._refresh_auth(reason)
+                        salesforce.describe()
+
+                        self.assertEqual(salesforce.access_token, 'access-2')
+                        self.assertEqual(
+                            session.get.call_args.args[0],
+                            'https://api.example/services/data/v52.0/'
+                            'sobjects/Account/describe')
+                        self.assertEqual(
+                            session.get.call_args.kwargs['headers']['Authorization'],
+                            'Bearer access-2')
+                        self.assertEqual(session.post.call_count, 2)
+                        self.assertTrue(all(
+                            call.args[0] == (
+                                'https://customer.example/services/oauth2/token')
+                            for call in session.post.call_args_list))
+
 
     @mock.patch.object(Salesforce, '_login_local')
     def test_existing_refresh_reasons_dispatch_to_local_oauth(self, login_local):

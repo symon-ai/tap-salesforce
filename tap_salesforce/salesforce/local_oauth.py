@@ -59,6 +59,7 @@ class LocalOAuthClient:
             base_url or local_oauth.get('base_url')
             or ('https://test.salesforce.com' if self.is_sandbox
                 else 'https://login.salesforce.com')).rstrip('/')
+        self._instance_url = None
         self.refresh_token_log_path = Path(local_oauth.get(
             'refresh_token_log_path',
             DEFAULT_REFRESH_TOKEN_LOG_PATH))
@@ -104,7 +105,7 @@ class LocalOAuthClient:
         access_token = payload.get('access_token')
         instance_url = (
             payload.get('instance_url') or payload.get('service_url')
-            or self.base_url)
+            or self._instance_url or self.base_url)
         if not isinstance(access_token, str) or not access_token.strip():
             raise LocalOAuthError(
                 'Local OAuth response missing access_token')
@@ -123,6 +124,8 @@ class LocalOAuthClient:
             self._append_refresh_token(
                 returned_refresh_token,
                 exchanged_at)
+
+        self._instance_url = instance_url
 
         LOGGER.info(
             'Local OAuth exchange completed at %s '
