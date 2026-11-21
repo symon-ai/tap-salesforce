@@ -42,7 +42,8 @@ def resolve_auth_mode(config):
             raise Exception(
                 "token_broker is required unless auth_mode is 'local'")
         try:
-            validate_local_oauth_config(config.get('local_oauth'))
+            validate_local_oauth_config(
+                config.get('local_oauth'), config.get('base_url'))
         except LocalOAuthError as exc:
             raise Exception(str(exc)) from exc
         return 'local'
@@ -619,7 +620,8 @@ def main_impl():
             filters=CONFIG.get('filters'),
             auth_mode=resolve_auth_mode(CONFIG),
             token_broker=CONFIG.get('token_broker'),
-            local_oauth=CONFIG.get('local_oauth')
+            local_oauth=CONFIG.get('local_oauth'),
+            base_url=CONFIG.get('base_url')
         )
 
         sf.login()

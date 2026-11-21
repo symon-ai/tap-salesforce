@@ -212,7 +212,12 @@ control; never send plaintext credentials to stdout, logs, shell arguments, or
 command history.
 
 `is_sandbox` defaults to `false`; set it to `true` to use
-`test.salesforce.com`. The refresh-token log path is optional and defaults to
+`test.salesforce.com`. For a customer-specific OAuth host, set the optional
+top-level `base_url` (for example, `https://example.my.salesforce.com`).
+Standalone configs may instead set `local_oauth.base_url`; the top-level value
+takes precedence. Tokens use `instance_url`, then `service_url`, for API routing,
+falling back to the configured base URL or the production/sandbox login host.
+The refresh-token log path is optional and defaults to
 the gitignored path shown above. Setting it to an empty string is invalid. The
 log file is owner-readable/writable only.
 

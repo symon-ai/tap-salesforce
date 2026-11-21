@@ -235,14 +235,16 @@ class Salesforce():
                  filters=None,
                  token_broker=None,
                  auth_mode=None,
-                 local_oauth=None):
+                 local_oauth=None,
+                 base_url=None):
         self.api_type = api_type.upper() if api_type else None
         self.token = token
         self.token_broker = token_broker or {}
         self.auth_mode = auth_mode or 'broker'
         self.session = requests.Session()
         self.local_oauth_client = (
-            LocalOAuthClient(local_oauth, session=self.session)
+            LocalOAuthClient(
+                local_oauth, session=self.session, base_url=base_url)
             if self.auth_mode == 'local'
             else None)
         self.access_token = None
