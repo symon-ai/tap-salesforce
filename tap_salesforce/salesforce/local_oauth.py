@@ -3,6 +3,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -17,6 +18,27 @@ DEFAULT_REFRESH_TOKEN_LOG_PATH = (
 
 class LocalOAuthError(Exception):
     """Raised when local Salesforce OAuth authentication fails."""
+
+
+def _validate_https_origin(value, field):
+    try:
+        parsed = urlsplit(value.strip())
+        valid = (
+            parsed.scheme == 'https'
+            and bool(parsed.hostname)
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.path in ('', '/')
+            and not parsed.query
+            and not parsed.fragment
+            and not any(character.isspace() for character in value.strip()))
+        parsed.port
+    except ValueError:
+        valid = False
+    if not valid:
+        raise LocalOAuthError(
+            '{} must be an HTTPS origin with a hostname and no credentials'.format(
+                field))
 
 
 def validate_local_oauth_config(local_oauth):
@@ -38,6 +60,8 @@ def validate_local_oauth_config(local_oauth):
             not isinstance(base_url, str) or not base_url.strip()):
         raise LocalOAuthError(
             'local_oauth.base_url must be a non-empty string')
+    if base_url is not None:
+        _validate_https_origin(base_url, 'local_oauth.base_url')
 
     log_path = local_oauth.get(
         'refresh_token_log_path',
@@ -86,7 +110,8 @@ class LocalOAuthClient:
                     'client_secret': self.client_secret,
                     'refresh_token': self.refresh_token,
                 },
-                timeout=LOCAL_OAUTH_REQUEST_TIMEOUT_SECONDS)
+                timeout=LOCAL_OAUTH_REQUEST_TIMEOUT_SECONDS,
+                allow_redirects=False)
             response.raise_for_status()
         except requests.RequestException as exc:
             LOGGER.error(
@@ -96,6 +121,9 @@ class LocalOAuthClient:
                 self.is_sandbox,
                 reason)
             raise LocalOAuthError('Local OAuth token exchange failed') from exc
+        if response.status_code in (301, 302, 303, 307, 308):
+            raise LocalOAuthError(
+                'Local OAuth token endpoint redirects are not allowed')
 
         try:
             payload = response.json()
@@ -114,6 +142,7 @@ class LocalOAuthClient:
         if not isinstance(instance_url, str) or not instance_url.strip():
             raise LocalOAuthError(
                 'Local OAuth response missing instance_url')
+        _validate_https_origin(instance_url, 'Local OAuth response instance_url')
 
         returned_refresh_token = payload.get('refresh_token')
         has_new_refresh_token = (

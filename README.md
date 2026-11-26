@@ -150,6 +150,9 @@ For a customer-supplied Salesforce endpoint, set `local_oauth.base_url` (for
 example, `https://salesforce.example.com`). It overrides the production/sandbox
 login host for the refresh-token exchange. API requests use the returned
 `instance_url`, then `service_url`, then the configured `base_url`, in that order.
+Configured and returned URLs must be HTTPS origins with a hostname and no
+credentials, path, query, or fragment (a trailing slash is allowed). Token
+exchange redirects are rejected; normal TLS certificate verification remains enabled.
 Without a configured URL, the existing production/sandbox login defaults apply,
 and the token response must supply an API URL. Broker mode needs no `base_url`:
 the application resolves the connection URL and returns it as `instanceUrl`.

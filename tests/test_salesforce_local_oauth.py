@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import requests
+
 from tap_salesforce import resolve_auth_mode, validate_config
 from tap_salesforce.salesforce import Salesforce
 from tap_salesforce.salesforce.local_oauth import (
@@ -86,6 +88,71 @@ class LocalOAuthConfigTests(unittest.TestCase):
 
 
 class LocalOAuthClientTests(unittest.TestCase):
+    def test_rejects_unsafe_base_url_before_post(self):
+        for base_url in (
+                'http://customer.example.com', 'https://', 'customer.example.com',
+                'https://user:secret@customer.example.com',
+                'https://customer.example.com/path',
+                'https://customer.example.com?query=1',
+                'https://customer.example.com#fragment',
+                'https://customer.example.com:invalid', 'https://[broken',
+                'https://customer .example.com'):
+            with self.subTest(base_url=base_url):
+                session = mock.Mock()
+                with self.assertRaisesRegex(LocalOAuthError, 'HTTPS origin'):
+                    LocalOAuthClient(
+                        _local_oauth('tokens.jsonl', base_url=base_url),
+                        session=session)
+                session.post.assert_not_called()
+
+    def test_rejects_token_redirect_without_following_it(self):
+        for status in (301, 302, 303, 307, 308):
+            for location in ('http://other.example.com/token',
+                             'https://other.example.com/token'):
+                with self.subTest(status=status, location=location):
+                    with tempfile.TemporaryDirectory() as directory:
+                        response = requests.Response()
+                        response.status_code = status
+                        response.headers['Location'] = location
+                        response._content = b'{}'
+                        response.request = requests.Request(
+                            'POST',
+                            'https://login.salesforce.com/services/oauth2/token',
+                        ).prepare()
+                        response.url = response.request.url
+                        adapter = mock.Mock(spec=requests.adapters.BaseAdapter)
+                        adapter.send.return_value = response
+                        with requests.Session() as session:
+                            session.mount('https://', adapter)
+                            session.mount('http://', adapter)
+                            client = LocalOAuthClient(
+                                _local_oauth(Path(directory) / 'tokens.jsonl'),
+                                session=session)
+                            with self.assertRaisesRegex(
+                                    LocalOAuthError, 'redirects are not allowed'):
+                                client.fetch_credentials('startup')
+                        self.assertEqual(adapter.send.call_count, 1)
+                        self.assertIs(adapter.send.call_args.kwargs['verify'], True)
+
+    def test_rejects_unsafe_returned_api_url(self):
+        for field in ('instance_url', 'service_url'):
+            for url in ('http://api.example.com', 'https://',
+                        'https://user:secret@api.example.com'):
+                with self.subTest(field=field, url=url):
+                    with tempfile.TemporaryDirectory() as directory:
+                        session = mock.Mock()
+                        session.post.return_value.json.return_value = {
+                            'access_token': 'opaque.jwt-like.token',
+                            field: url,
+                        }
+                        client = LocalOAuthClient(
+                            _local_oauth(
+                                Path(directory) / 'tokens.jsonl',
+                                base_url='https://customer.example.com'),
+                            session=session)
+                        with self.assertRaisesRegex(LocalOAuthError, 'HTTPS origin'):
+                            client.fetch_credentials('startup')
+
     def test_custom_endpoint_and_response_routing_precedence(self):
         cases = (
             ({}, 'https://customer.example.com'),
@@ -160,7 +227,8 @@ class LocalOAuthClientTests(unittest.TestCase):
                     'client_secret': 'client-secret',
                     'refresh_token': 'refresh-token-1',
                 },
-                timeout=LOCAL_OAUTH_REQUEST_TIMEOUT_SECONDS)
+                timeout=LOCAL_OAUTH_REQUEST_TIMEOUT_SECONDS,
+                allow_redirects=False)
             self.assertEqual(log_path.read_text(encoding='utf-8'), '')
 
     @mock.patch('tap_salesforce.salesforce.local_oauth.LOGGER')
