@@ -33,6 +33,12 @@ def validate_local_oauth_config(local_oauth):
     if not isinstance(is_sandbox, bool):
         raise LocalOAuthError('local_oauth.is_sandbox must be a boolean')
 
+    base_url = local_oauth.get('base_url')
+    if base_url is not None and (
+            not isinstance(base_url, str) or not base_url.strip()):
+        raise LocalOAuthError(
+            'local_oauth.base_url must be a non-empty string')
+
     log_path = local_oauth.get(
         'refresh_token_log_path',
         DEFAULT_REFRESH_TOKEN_LOG_PATH)
@@ -50,6 +56,9 @@ class LocalOAuthClient:
         self.client_secret = local_oauth['client_secret']
         self.refresh_token = local_oauth['refresh_token']
         self.is_sandbox = local_oauth.get('is_sandbox', False)
+        self.base_url = local_oauth.get('base_url')
+        if self.base_url is not None:
+            self.base_url = self.base_url.strip().rstrip('/')
         self.refresh_token_log_path = Path(local_oauth.get(
             'refresh_token_log_path',
             DEFAULT_REFRESH_TOKEN_LOG_PATH))
@@ -59,7 +68,8 @@ class LocalOAuthClient:
     @property
     def token_url(self):
         domain = 'test.salesforce.com' if self.is_sandbox else 'login.salesforce.com'
-        return 'https://{}/services/oauth2/token'.format(domain)
+        base_url = self.base_url or 'https://{}'.format(domain)
+        return '{}/services/oauth2/token'.format(base_url)
 
     def fetch_credentials(self, reason):
         if reason not in LOCAL_OAUTH_REASONS:
@@ -94,7 +104,10 @@ class LocalOAuthClient:
                 'Local OAuth token endpoint returned invalid JSON') from exc
 
         access_token = payload.get('access_token')
-        instance_url = payload.get('instance_url')
+        instance_url = (
+            payload.get('instance_url')
+            or payload.get('service_url')
+            or self.base_url)
         if not isinstance(access_token, str) or not access_token.strip():
             raise LocalOAuthError(
                 'Local OAuth response missing access_token')

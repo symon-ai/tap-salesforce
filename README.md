@@ -146,6 +146,14 @@ Before preparing the config:
 The stored Salesforce access token and instance URL are not required in
 `local_oauth`; the refresh-token exchange returns fresh values.
 
+For a customer-supplied Salesforce endpoint, set `local_oauth.base_url` (for
+example, `https://salesforce.example.com`). It overrides the production/sandbox
+login host for the refresh-token exchange. API requests use the returned
+`instance_url`, then `service_url`, then the configured `base_url`, in that order.
+Without a configured URL, the existing production/sandbox login defaults apply,
+and the token response must supply an API URL. Broker mode needs no `base_url`:
+the application resolves the connection URL and returns it as `instanceUrl`.
+
 ```json
 {
   "auth_mode": "local",

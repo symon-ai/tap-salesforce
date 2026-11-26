@@ -76,8 +76,63 @@ class LocalOAuthConfigTests(unittest.TestCase):
                 'tokens.jsonl',
                 is_sandbox='true'))
 
+    def test_rejects_invalid_base_url(self):
+        for base_url in ('', '   ', False, 123):
+            with self.subTest(base_url=base_url):
+                with self.assertRaisesRegex(
+                        LocalOAuthError, 'base_url must be a non-empty string'):
+                    validate_local_oauth_config(_local_oauth(
+                        'tokens.jsonl', base_url=base_url))
+
 
 class LocalOAuthClientTests(unittest.TestCase):
+    def test_custom_endpoint_and_response_routing_precedence(self):
+        cases = (
+            ({}, 'https://customer.example.com'),
+            ({'service_url': 'https://service.example.com'},
+             'https://service.example.com'),
+            ({'instance_url': 'https://instance.example.com',
+              'service_url': 'https://service.example.com'},
+             'https://instance.example.com'),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for routing, expected in cases:
+                with self.subTest(routing=routing):
+                    response = mock.Mock()
+                    response.json.return_value = {
+                        'access_token': 'access-token', **routing}
+                    session = mock.Mock()
+                    session.post.return_value = response
+                    client = LocalOAuthClient(
+                        _local_oauth(
+                            Path(directory) / 'tokens.jsonl',
+                            base_url='https://customer.example.com/',
+                            is_sandbox=True),
+                        session=session)
+
+                    credentials = client.fetch_credentials('startup')
+
+                    self.assertEqual(credentials['instance_url'], expected)
+                    self.assertEqual(
+                        session.post.call_args.args[0],
+                        'https://customer.example.com/services/oauth2/token')
+
+    def test_missing_routing_without_configured_base_url_still_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = mock.Mock()
+            session.post.return_value.json.return_value = {
+                'access_token': 'access-token'}
+            client = LocalOAuthClient(
+                _local_oauth(Path(directory) / 'tokens.jsonl'),
+                session=session)
+
+            self.assertEqual(
+                client.token_url,
+                'https://login.salesforce.com/services/oauth2/token')
+            with self.assertRaisesRegex(
+                    LocalOAuthError, 'missing instance_url'):
+                client.fetch_credentials('startup')
+
     def test_uses_sandbox_endpoint_and_preserves_request_secrets_in_memory_only(self):
         with tempfile.TemporaryDirectory() as directory:
             response = mock.Mock()
@@ -158,6 +213,45 @@ class LocalOAuthClientTests(unittest.TestCase):
 
 
 class LocalOAuthSalesforceTests(unittest.TestCase):
+    def test_resolved_local_routing_is_applied_on_login_and_refresh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            salesforce = Salesforce(
+                default_start_date='2020-01-01T00:00:00Z',
+                source_type='object',
+                object_name='Account',
+                auth_mode='local',
+                local_oauth=_local_oauth(
+                    Path(directory) / 'tokens.jsonl',
+                    base_url='https://customer.example.com'))
+            response = mock.Mock()
+            response.json.side_effect = [
+                {'access_token': 'access-1'},
+                {'access_token': 'access-2',
+                 'service_url': 'https://service.example.com'},
+                {'access_token': 'access-3',
+                 'instance_url': 'https://instance.example.com',
+                 'service_url': 'https://service.example.com'},
+            ]
+            api_response = mock.Mock()
+            api_response.headers = {}
+            with mock.patch.object(
+                    salesforce.session, 'post', return_value=response), \
+                    mock.patch.object(
+                        salesforce.session, 'get',
+                        return_value=api_response) as get:
+                for reason, expected in (
+                        ('startup', 'https://customer.example.com'),
+                        ('periodic', 'https://service.example.com'),
+                        ('invalid_session', 'https://instance.example.com')):
+                    salesforce._refresh_auth(reason)
+                    self.assertEqual(salesforce.instance_url, expected)
+                    url = salesforce.data_url.format(
+                        salesforce.instance_url, 'sobjects')
+                    salesforce._make_request('GET', url)
+                    self.assertEqual(
+                        get.call_args.args[0],
+                        expected + '/services/data/v52.0/sobjects')
+
     @mock.patch.object(Salesforce, '_login_local')
     def test_existing_refresh_reasons_dispatch_to_local_oauth(self, login_local):
         with tempfile.TemporaryDirectory() as directory:
