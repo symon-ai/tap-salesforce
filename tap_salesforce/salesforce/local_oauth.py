@@ -44,12 +44,18 @@ def validate_local_oauth_config(local_oauth):
 class LocalOAuthClient:
     """Exchanges a local refresh token and preserves rotated replacements."""
 
-    def __init__(self, local_oauth, session=None):
+    def __init__(self, local_oauth, session=None, base_url=None):
         validate_local_oauth_config(local_oauth)
         self.client_id = local_oauth['client_id']
         self.client_secret = local_oauth['client_secret']
         self.refresh_token = local_oauth['refresh_token']
         self.is_sandbox = local_oauth.get('is_sandbox', False)
+        default_url = (
+            'https://test.salesforce.com'
+            if self.is_sandbox
+            else 'https://login.salesforce.com')
+        self.base_url = (base_url or '').strip().rstrip('/') or default_url
+        self.instance_url = self.base_url
         self.refresh_token_log_path = Path(local_oauth.get(
             'refresh_token_log_path',
             DEFAULT_REFRESH_TOKEN_LOG_PATH))
@@ -58,8 +64,7 @@ class LocalOAuthClient:
 
     @property
     def token_url(self):
-        domain = 'test.salesforce.com' if self.is_sandbox else 'login.salesforce.com'
-        return 'https://{}/services/oauth2/token'.format(domain)
+        return '{}/services/oauth2/token'.format(self.base_url)
 
     def fetch_credentials(self, reason):
         if reason not in LOCAL_OAUTH_REASONS:
@@ -94,13 +99,14 @@ class LocalOAuthClient:
                 'Local OAuth token endpoint returned invalid JSON') from exc
 
         access_token = payload.get('access_token')
-        instance_url = payload.get('instance_url')
         if not isinstance(access_token, str) or not access_token.strip():
             raise LocalOAuthError(
                 'Local OAuth response missing access_token')
-        if not isinstance(instance_url, str) or not instance_url.strip():
-            raise LocalOAuthError(
-                'Local OAuth response missing instance_url')
+        for field in ('instance_url', 'service_url'):
+            instance_url = payload.get(field)
+            if isinstance(instance_url, str) and instance_url.strip():
+                self.instance_url = instance_url.strip().rstrip('/')
+                break
 
         returned_refresh_token = payload.get('refresh_token')
         has_new_refresh_token = (
@@ -127,7 +133,7 @@ class LocalOAuthClient:
 
         return {
             'access_token': access_token,
-            'instance_url': instance_url,
+            'instance_url': self.instance_url,
             'token_version': str(
                 payload.get('issued_at')
                 or self._format_timestamp(exchanged_at)),

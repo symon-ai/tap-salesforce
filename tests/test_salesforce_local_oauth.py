@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tap_salesforce import resolve_auth_mode, validate_config
+from tap_salesforce import main_impl, resolve_auth_mode, validate_config
 from tap_salesforce.salesforce import Salesforce
 from tap_salesforce.salesforce.local_oauth import (
     LOCAL_OAUTH_REQUEST_TIMEOUT_SECONDS,
@@ -78,6 +78,67 @@ class LocalOAuthConfigTests(unittest.TestCase):
 
 
 class LocalOAuthClientTests(unittest.TestCase):
+    def test_custom_base_url_and_blank_url_defaults(self):
+        cases = (
+            (None, False, 'https://login.salesforce.com'),
+            ('', False, 'https://login.salesforce.com'),
+            (' \t ', True, 'https://test.salesforce.com'),
+            ('https://oauth.customer.example///', True,
+             'https://oauth.customer.example'),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for base_url, is_sandbox, expected_url in cases:
+                with self.subTest(base_url=base_url, is_sandbox=is_sandbox):
+                    session = mock.Mock()
+                    session.post.return_value.json.return_value = {
+                        'access_token': 'opaque-access-token',
+                    }
+                    client = LocalOAuthClient(
+                        _local_oauth(
+                            Path(directory) / 'tokens.jsonl',
+                            is_sandbox=is_sandbox),
+                        session=session,
+                        base_url=base_url)
+
+                    credentials = client.fetch_credentials('startup')
+
+                    self.assertEqual(credentials['instance_url'], expected_url)
+                    self.assertEqual(
+                        session.post.call_args.args[0],
+                        expected_url + '/services/oauth2/token')
+
+    def test_api_url_precedence_and_refresh_preserve_oauth_host(self):
+        cases = (
+            ('startup', {
+                'instance_url': 'https://instance.customer.example/',
+                'service_url': 'https://ignored.customer.example',
+            }, 'https://instance.customer.example'),
+            ('periodic', {
+                'instance_url': ' ',
+                'service_url': 'https://service.customer.example///',
+            }, 'https://service.customer.example'),
+            ('invalid_session', {}, 'https://service.customer.example'),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            session = mock.Mock()
+            client = LocalOAuthClient(
+                _local_oauth(Path(directory) / 'tokens.jsonl'),
+                session=session,
+                base_url='https://oauth.customer.example/')
+            for reason, routing, expected_url in cases:
+                with self.subTest(reason=reason):
+                    session.post.return_value.json.return_value = {
+                        'access_token': 'opaque-access-token',
+                        **routing,
+                    }
+
+                    credentials = client.fetch_credentials(reason)
+
+                    self.assertEqual(credentials['instance_url'], expected_url)
+                    self.assertEqual(
+                        session.post.call_args.args[0],
+                        'https://oauth.customer.example/services/oauth2/token')
+
     def test_uses_sandbox_endpoint_and_preserves_request_secrets_in_memory_only(self):
         with tempfile.TemporaryDirectory() as directory:
             response = mock.Mock()
@@ -158,6 +219,44 @@ class LocalOAuthClientTests(unittest.TestCase):
 
 
 class LocalOAuthSalesforceTests(unittest.TestCase):
+    @mock.patch('tap_salesforce.do_discover')
+    @mock.patch('tap_salesforce.salesforce.requests.Session')
+    def test_singer_config_reaches_oauth_and_service_url_reaches_api(
+            self, session_factory, discover):
+        with tempfile.TemporaryDirectory() as directory:
+            config = _tap_config(_local_oauth(
+                Path(directory) / 'tokens.jsonl'))
+            config['base_url'] = 'https://oauth.customer.example/'
+            config_path = Path(directory) / 'config.json'
+            config_path.write_text(json.dumps(config), encoding='utf-8')
+            session = session_factory.return_value
+            session.post.return_value.json.return_value = {
+                'access_token': 'opaque-access-token',
+                'service_url': 'https://api.customer.example/',
+            }
+            session.get.return_value.headers = {}
+            session.get.return_value.json.return_value = {'fields': []}
+
+            with mock.patch.dict('tap_salesforce.CONFIG', {}, clear=True):
+                with mock.patch('sys.argv', [
+                        'tap-salesforce', '--config', str(config_path),
+                        '--discover']):
+                    main_impl()
+
+            salesforce = discover.call_args.args[0]
+            salesforce.describe()
+
+            self.assertEqual(
+                session.post.call_args.args[0],
+                'https://oauth.customer.example/services/oauth2/token')
+            self.assertEqual(
+                session.get.call_args.args[0],
+                'https://api.customer.example/services/data/v52.0/'
+                'sobjects/Account/describe')
+            self.assertEqual(
+                session.get.call_args.kwargs['headers']['Authorization'],
+                'Bearer opaque-access-token')
+
     @mock.patch.object(Salesforce, '_login_local')
     def test_existing_refresh_reasons_dispatch_to_local_oauth(self, login_local):
         with tempfile.TemporaryDirectory() as directory:
