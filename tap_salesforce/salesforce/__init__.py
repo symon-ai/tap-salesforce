@@ -426,37 +426,21 @@ class Salesforce():
                                                                        self.quota_percent_per_run)
             raise SymonException(partial_message, 'salesforce.SalesforceApiError') 
 
-    # pylint: disable=too-many-arguments
+    # Retry transport with the already refreshed URL and headers.
     @backoff.on_exception(backoff.expo,
                           (requests.exceptions.ConnectionError,
                            requests.exceptions.Timeout),
                           max_tries=10,
                           factor=2,
                           on_backoff=log_backoff_attempt)
-    def _make_request(self,
-                      http_method,
-                      url,
-                      headers=None,
-                      body=None,
-                      stream=False,
-                      params=None,
-                      log_body=True,
-                      invalid_session_retried=False):
+    def _send_request(self, http_method, url, headers, body, stream, params,
+                      log_body):
         request_timeout = 5 * 60  # 5 minute request timeout
-        previous_instance_url = self.instance_url
-        if self._validate_broker_token_if_due():
-            refreshed_headers = self._with_refreshed_auth_header(headers)
-            if headers is not None:
-                headers.update(refreshed_headers)
-            else:
-                headers = refreshed_headers
-            url = self._with_current_instance_url(url, previous_instance_url)
-
         try:
             if http_method == "GET":
                 LOGGER.info("Making %s request to %s with params: %s",
                             http_method, url, params)
-                resp = self.session.get(url,
+                return self.session.get(url,
                                         headers=headers,
                                         stream=stream,
                                         params=params,
@@ -467,7 +451,7 @@ class Salesforce():
                                 http_method, url, body)
                 else:
                     LOGGER.info("Making %s request to %s", http_method, url)
-                resp = self.session.post(url,
+                return self.session.post(url,
                                          headers=headers,
                                          data=body,
                                          timeout=request_timeout,)
@@ -481,6 +465,28 @@ class Salesforce():
             LOGGER.error(
                 'Took longer than %s seconds to hear from the server', request_timeout)
             raise timeout_err
+
+    # pylint: disable=too-many-arguments
+    def _make_request(self,
+                      http_method,
+                      url,
+                      headers=None,
+                      body=None,
+                      stream=False,
+                      params=None,
+                      log_body=True,
+                      invalid_session_retried=False):
+        previous_instance_url = self.instance_url
+        if self._validate_broker_token_if_due():
+            refreshed_headers = self._with_refreshed_auth_header(headers)
+            if headers is not None:
+                headers.update(refreshed_headers)
+            else:
+                headers = refreshed_headers
+            url = self._with_current_instance_url(url, previous_instance_url)
+
+        resp = self._send_request(
+            http_method, url, headers, body, stream, params, log_body)
 
         try:
             resp.raise_for_status()

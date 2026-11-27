@@ -299,7 +299,9 @@ class SalesforceApiRoutingTests(unittest.TestCase):
 
     def test_refresh_rebases_rest_report_and_bulk_requests(self):
         for auth_mode in ('local', 'broker'):
-            for reason in ('periodic', 'invalid_session', 'periodic_then_invalid'):
+            for reason in (
+                    'periodic', 'invalid_session', 'periodic_then_invalid',
+                    'periodic_connection_error', 'periodic_timeout'):
                 for consumer in ('rest', 'report', 'bulk'):
                     with self.subTest(
                             auth_mode=auth_mode, reason=reason, consumer=consumer):
@@ -349,7 +351,14 @@ class SalesforceApiRoutingTests(unittest.TestCase):
                                     return self._response(request, payload)
 
                                 api_requests.append((request, options))
-                                if (reason != 'periodic'
+                                if len(api_requests) == 1:
+                                    if reason == 'periodic_connection_error':
+                                        raise requests.exceptions.ConnectionError(
+                                            'temporary transport failure')
+                                    if reason == 'periodic_timeout':
+                                        raise requests.exceptions.Timeout(
+                                            'temporary transport timeout')
+                                if (reason in ('invalid_session', 'periodic_then_invalid')
                                         and len(api_requests) == 1):
                                     return self._response(
                                         request,
@@ -378,7 +387,9 @@ class SalesforceApiRoutingTests(unittest.TestCase):
                                     payload = {'id': 'job-id'}
                                 return self._response(request, payload)
 
-                            with mock.patch.object(sf.session, 'send', side_effect=send):
+                            with mock.patch.object(
+                                    sf.session, 'send', side_effect=send), mock.patch(
+                                        'backoff._sync.time.sleep'):
                                 with mock.patch(
                                         'tap_salesforce.salesforce.time.monotonic',
                                         return_value=1000):
@@ -413,6 +424,16 @@ class SalesforceApiRoutingTests(unittest.TestCase):
                             self.assertEqual(
                                 api_requests[0][0].url.split('?')[0],
                                 first_base + endpoint)
+                            first_token = (
+                                'access-0' if reason == 'invalid_session'
+                                else 'access-1')
+                            auth_header = (
+                                'X-SFDC-Session' if consumer == 'bulk'
+                                else 'Authorization')
+                            self.assertEqual(
+                                api_requests[0][0].headers[auth_header],
+                                first_token if consumer == 'bulk'
+                                else 'Bearer ' + first_token)
                             first_success = 0 if reason == 'periodic' else 1
                             request, options = api_requests[first_success]
                             self.assertEqual(request.url.split('?')[0], bases[-1] + endpoint)
@@ -458,7 +479,7 @@ class SalesforceApiRoutingTests(unittest.TestCase):
                                 expected_reasons = ['startup']
                                 if reason != 'invalid_session':
                                     expected_reasons.append('periodic')
-                                if reason != 'periodic':
+                                if reason in ('invalid_session', 'periodic_then_invalid'):
                                     expected_reasons.append('invalid_session')
                                 self.assertEqual(
                                     [json.loads(item.body)['reason']

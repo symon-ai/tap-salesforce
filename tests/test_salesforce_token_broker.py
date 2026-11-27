@@ -493,27 +493,25 @@ class SalesforceBrokerModeTests(unittest.TestCase):
     def test_invalid_session_does_not_retry_network_failures(self, mock_fetch):
         sf = self._broker_salesforce()
         sf._set_session_credentials('old-access', 'https://instance.salesforce.com', 'v-old')
-        make_request = getattr(sf._make_request, '__wrapped__', sf._make_request)
 
         with mock.patch.object(
                 sf.session,
                 'get',
-                side_effect=requests.exceptions.ConnectionError('network down')) as mock_get:
+                side_effect=requests.exceptions.ConnectionError('network down')) as mock_get, \
+                mock.patch('backoff._sync.time.sleep'):
             with self.assertRaises(requests.exceptions.ConnectionError):
-                make_request(
-                    sf,
+                sf._make_request(
                     'GET',
                     'https://instance.salesforce.com/services/data/v52.0/queryAll',
                     headers={'Authorization': 'Bearer old-access'})
 
-        mock_get.assert_called_once()
+        self.assertEqual(mock_get.call_count, 10)
         mock_fetch.assert_not_called()
 
     @mock.patch('tap_salesforce.salesforce.fetch_broker_credentials')
     def test_invalid_session_does_not_retry_uncertain_failures(self, mock_fetch):
         sf = self._broker_salesforce()
         sf._set_session_credentials('old-access', 'https://instance.salesforce.com', 'v-old')
-        make_request = getattr(sf._make_request, '__wrapped__', sf._make_request)
 
         invalid_response = mock.Mock()
         invalid_response.json.side_effect = ValueError('not json')
@@ -522,8 +520,7 @@ class SalesforceBrokerModeTests(unittest.TestCase):
 
         with mock.patch.object(sf.session, 'get', return_value=invalid_response) as mock_get:
             with self.assertRaises(HTTPError):
-                make_request(
-                    sf,
+                sf._make_request(
                     'GET',
                     'https://instance.salesforce.com/services/data/v52.0/queryAll',
                     headers={'Authorization': 'Bearer old-access'})
