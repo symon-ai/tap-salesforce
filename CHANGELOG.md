@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Preserve the full refreshed API base URL, including its path prefix, when retrying or refreshing REST, report and Bulk requests.
+
 
 ## 2.0.14
 
